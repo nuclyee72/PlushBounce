@@ -33,6 +33,9 @@ const MIN_STRENGTH: f32 = 0.3;
 /// 박이 잡혀 있을 때, 반박 격자에서 이만큼(박 단위) 넘게 벗어난 온셋은 OFF_GRID_STRENGTH 이상 세야 받는다.
 const GRID_TOLERANCE: f64 = 0.13;
 const OFF_GRID_STRENGTH: f32 = 0.52;
+/// 박 위치의 큰 차이를 믿기까지 필요한 연속 추정 수(0.5초마다), 한 번에 옮기는 최대량(박 단위).
+const PHASE_VOTES: u32 = 3;
+const PHASE_MAX_STEP: f64 = 0.15;
 /// 간격 자동: 박 간격의 이만큼을 최소 온셋 간격으로 (0.22박 ≈ 16분음표보다 조금 짧게 → 16분음표까지는 잡고 한 타격의 겹침은 거른다).
 const AUTO_GAP_BEATS: f32 = 0.22;
 const AUTO_GAP_MIN_MS: f32 = 70.0;
@@ -47,9 +50,18 @@ const TEMPO_WINDOW_S: f32 = 5.0;
 const TEMPO_WARMUP_S: f32 = 3.0;
 /// 다른 템포로 갈아타려면 연속으로 이만큼(0.5초마다 한 번) 같은 추정이 나와야 한다.
 const TEMPO_SWITCH_COUNT: u32 = 4;
+/// 지금 템포와 배수 관계(2배·절반·2:3)인 값으로는 이만큼 연속(0.5초마다) 나와야 갈아탄다.
+const TEMPO_SWITCH_RELATED: u32 = 8;
 /// 이만큼(초) 무음이면 템포를 잊는다.
 const TEMPO_FORGET_SILENT_S: f32 = 1.2;
 
+/// 템포 사전 가중: 이 BPM 중심, log2 폭.
+const TEMPO_PRIOR_BPM: f32 = 120.0;
+const TEMPO_PRIOR_WIDTH: f32 = 0.55;
+/// 절반 간격(두 배 빠른 템포)의 자기상관이 이 비율 이상이면 빠른 쪽을 박으로 본다.
+const HALF_LAG_RATIO: f32 = 0.4;
+/// 2/3 간격(1.5배 빠른 템포)의 자기상관이 이 비율 이상이면 빠른 쪽을 박으로 본다.
+const THIRDS_LAG_RATIO: f32 = 0.6;
 const BPM_MIN: f32 = 70.0;
 const BPM_MAX: f32 = 180.0;
 
@@ -394,6 +406,9 @@ struct Tempo {
     period: Option<f32>,
     candidate: Option<(f32, u32)>,
     misses: u32,
+    /// 박 위치(위상)의 큰 차이가 같은 쪽으로 연속 몇 번 나왔는가, 그리고 다음에 나올 것으로 예상되는 차이.
+    phase_votes: u32,
+    phase_expect: Option<f64>,
     next_beat: f64,
     last_beat: f64,
     buf: Vec<f32>,
@@ -411,6 +426,8 @@ impl Tempo {
             period: None,
             candidate: None,
             misses: 0,
+            phase_votes: 0,
+            phase_expect: None,
             next_beat: 0.0,
             last_beat: -1e12,
             buf: Vec::with_capacity(cap),
@@ -429,6 +446,8 @@ impl Tempo {
 
     fn reset(&mut self) {
         self.env.clear();
+        self.phase_votes = 0;
+        self.phase_expect = None;
         self.period = None;
         self.candidate = None;
         self.misses = 0;
@@ -507,7 +526,9 @@ impl Tempo {
                 continue;
             }
             let bpm = 60.0 * self.fps / lag as f32;
-            let prior = (-0.5 * ((bpm / 120.0).log2() / 0.8).powi(2)).exp();
+            // 춤추는 박(대략 90~160BPM) 쪽으로 기울인다. 킥·스네어가 두 박마다 되풀이되는 곡에서
+            // 두 박을 한 박으로 잡는(절반 템포) 실수가 잦아서, 예전(폭 0.8)보다 좁혔다.
+            let prior = (-0.5 * ((bpm / TEMPO_PRIOR_BPM).log2() / TEMPO_PRIOR_WIDTH).powi(2)).exp();
             let double = if lag * 2 < n * 3 / 4 { acf(lag * 2) } else { r };
             let score = (r + 0.5 * double.max(0.0)) * prior;
             if score > best.1 {
@@ -522,7 +543,20 @@ impl Tempo {
                 .filter(|l| *l >= lag_min && *l <= lag_max)
                 .map(|l| (l, acf(l)))
                 .fold((0usize, f32::MIN), |a, b| if b.1 > a.1 { b } else { a });
-            if cand.0 > 0 && cand.1 >= 0.6 * top {
+            if cand.0 > 0 && cand.1 >= HALF_LAG_RATIO * top {
+                best.0 = cand.0;
+            }
+        }
+        // 2:3 실수: 1.5박을 한 박으로 잡은 경우(반박마다 하이햇이 있으면 1.5박 간격에도 봉우리가 선다).
+        // 2/3 간격(1.5배 빠른 템포)의 봉우리도 뚜렷하면 그쪽이 실제 박이다.
+        if best.0 > 0 {
+            let top = acf(best.0);
+            let l = (best.0 as f32 * 2.0 / 3.0).round() as usize;
+            let cand = (l.saturating_sub(1)..=l + 1)
+                .filter(|x| *x >= lag_min && *x <= lag_max)
+                .map(|x| (x, acf(x)))
+                .fold((0usize, f32::MIN), |a, b| if b.1 > a.1 { b } else { a });
+            if cand.0 > 0 && cand.1 >= THIRDS_LAG_RATIO * top {
                 best.0 = cand.0;
             }
         }
@@ -550,12 +584,17 @@ impl Tempo {
                 self.period = Some(0.7 * p + 0.3 * new_p);
                 self.candidate = None;
             }
-            Some(_) => match self.candidate {
+            Some(p) => match self.candidate {
                 // 다른 템포가 연속으로 나올 때만 갈아탄다.
                 Some((c, count)) if close(new_p, c) => {
                     // 실제 음악에서는 추정이 2:3, 1:2 같은 배수 사이를 오가기 쉽다. 2초 내내 같은
                     // 값이 나올 때만 갈아타서 박이 중간에 흔들리지 않게 한다.
-                    if count + 1 >= TEMPO_SWITCH_COUNT {
+                    // 지금 템포의 2배·절반·2:3 관계로 갈아타는 것은 대개 잘못 잡은 것이라(곡이 바뀐 게 아니라)
+                    // 더 오래(4초) 같은 값이 나와야 갈아탄다.
+                    let r = new_p / p;
+                    let related = [2.0f32, 0.5, 1.5, 2.0 / 3.0].iter().any(|k| (r / k - 1.0).abs() < 0.06);
+                    let need = if related { TEMPO_SWITCH_RELATED } else { TEMPO_SWITCH_COUNT };
+                    if count + 1 >= need {
                         self.period = Some(new_p);
                         self.candidate = None;
                     } else {
@@ -604,14 +643,27 @@ impl Tempo {
         if diff < -pf / 2.0 {
             diff += pf;
         }
-        if diff.abs() < 0.2 * pf {
-            self.next_beat += 0.35 * diff;
+        // 작은 차이는 조금씩 당긴다. 큰 차이(박과 엇박을 헷갈린 경우가 많다)는 같은 쪽으로 3번 연속(1.5초)
+        // 나와야 믿고, 그때도 한 번에 0.15박씩만 옮긴다. 예전엔 바로 옮겨서 박이 반 박씩 튀었고,
+        // 그 사이 박 하나를 건너뛰어 "박" 인형이 두 박에 한 번 움직이는 것처럼 보였다.
+        let max_step = PHASE_MAX_STEP * pf;
+        let step = if diff.abs() < 0.2 * pf {
+            self.phase_votes = 0;
+            0.35 * diff
         } else {
-            self.next_beat += diff;
-        }
-        // 직전 박과 너무 붙지 않게 한다.
-        while self.next_beat < self.last_beat + 0.6 * pf {
-            self.next_beat += pf;
+            let same = self.phase_expect.is_some_and(|e| (e - diff).abs() < 0.15 * pf);
+            self.phase_votes = if same { self.phase_votes + 1 } else { 1 };
+            if self.phase_votes >= PHASE_VOTES {
+                diff.clamp(-max_step, max_step)
+            } else {
+                0.0
+            }
+        };
+        self.phase_expect = (diff.abs() >= 0.2 * pf).then_some(diff - step);
+        self.next_beat += step;
+        // 박 간격이 0.8박보다 줄지 않게 한다 (한 박을 통째로 건너뛰지 않는다).
+        if self.next_beat < self.last_beat + 0.8 * pf {
+            self.next_beat = self.last_beat + 0.8 * pf;
         }
     }
 }
@@ -749,6 +801,72 @@ mod tests {
                 let d = times.iter().map(|t| (t - b).abs()).fold(f32::MAX, f32::min);
                 assert!(d < 0.06, "beat at {b} is {d}s from a click ({bpm} bpm)");
             }
+        }
+    }
+
+    /// 박 사이 간격들(초). 박을 잡은 뒤 from초부터.
+    fn beat_gaps(frames: &[FrameOut], fps: f32, from: f32) -> Vec<f32> {
+        let beats: Vec<f32> = frames.iter().enumerate().filter(|(i, f)| f.beat && *i as f32 / fps > from).map(|(i, _)| i as f32 / fps).collect();
+        beats.windows(2).map(|w| w[1] - w[0]).collect()
+    }
+
+    /// 실제 곡에 가깝게: 박마다 킥(세기 들쭉날쭉), 2·4박 스네어, 반박마다 하이햇(가끔 킥보다 셈),
+    /// 16분음표 고스트, 모든 타격에 ±15ms 흔들림, 바닥 잡음.
+    fn groove(bpm: f32, secs: f32, seed: u32) -> Vec<f32> {
+        let p = 60.0 / bpm;
+        let mut rng = Rng(seed);
+        let mut sig = vec![0.0f32; (secs * SR as f32) as usize];
+        let jit = |r: &mut Rng| r.next() * 0.015;
+        let mut kicks = Vec::new();
+        let mut snares = Vec::new();
+        let mut hats = Vec::new();
+        let mut ghosts = Vec::new();
+        for (i, t) in every(p, 0.2, secs).into_iter().enumerate() {
+            kicks.push((t + jit(&mut rng), 0.35 + 0.25 * rng.next().abs()));
+            if i % 2 == 1 {
+                snares.push(t + jit(&mut rng));
+            }
+            hats.push((t + p / 2.0 + jit(&mut rng), 0.25 + 0.3 * rng.next().abs()));
+            ghosts.push((t + p * 0.75 + jit(&mut rng), 0.08 + 0.1 * rng.next().abs()));
+        }
+        for (t, a) in &kicks {
+            add_bursts(&mut sig, 60.0, &[*t], 0.1, *a);
+        }
+        for (t, a) in hats.iter().chain(ghosts.iter()) {
+            for (o, v) in sig.iter_mut().zip(clicks(&[*t], secs, *a)) {
+                *o += v;
+            }
+        }
+        add_bursts(&mut sig, 220.0, &snares, 0.08, 0.35);
+        for (o, v) in sig.iter_mut().zip(clicks(&snares, secs, 0.35)) {
+            *o += v;
+        }
+        for o in sig.iter_mut() {
+            *o += rng.next() * 0.01;
+        }
+        sig
+    }
+
+    #[test]
+    fn beats_stay_even_in_a_busy_groove() {
+        // 박이 반 박씩 튀거나 템포를 절반으로 잡으면 "박" 인형이 두 박에 한 번처럼 보인다.
+        //  - 절반 템포로 잡으면 안 된다. 느린 곡(100BPM 미만)은 두 배로 잡는 것까지는 허용한다.
+        //  - 박을 잡은 뒤(10초부터) 박 사이 간격이 잡은 템포대로 고르다 (15% 넘게 어긋난 간격이 10% 이하).
+        let cases = [
+            (85.0f32, 11u32), (92.0, 31), (96.0, 5), (100.0, 12), (109.0, 1), (109.0, 21), (118.0, 13), (124.0, 14), (128.0, 2),
+            (128.0, 32), (135.0, 15), (142.0, 3), (142.0, 23), (145.0, 33), (150.0, 16), (156.0, 17), (160.0, 34), (163.0, 4),
+            (163.0, 24), (170.0, 18), (176.0, 19),
+        ];
+        for (bpm, seed) in cases {
+            let secs = 24.0;
+            let (frames, fps) = run(&groove(bpm, secs, seed));
+            let est = frames.last().unwrap().bpm.expect("tempo should be found");
+            let ok_tempo = (est / bpm - 1.0).abs() < 0.03 || (bpm < 100.0 && (est / (2.0 * bpm) - 1.0).abs() < 0.03);
+            assert!(ok_tempo, "{bpm}BPM estimated as {est:.1}");
+            let p = 60.0 / est;
+            let gaps = beat_gaps(&frames, fps, 10.0);
+            let bad = gaps.iter().filter(|g| (*g / p - 1.0).abs() > 0.2).count();
+            assert!(bad as f32 <= 0.1 * gaps.len() as f32, "{bpm}BPM (est {est:.1}): {bad}/{} uneven beat gaps {gaps:?}", gaps.len());
         }
     }
 
