@@ -1,0 +1,164 @@
+//! stage(렌더) 창. 모드나 모니터가 바뀌면 새로 만든다.
+
+use super::wallpaper;
+use crate::config::Mode;
+use crate::state::{lock, Shared};
+use serde::Serialize;
+use std::sync::atomic::Ordering;
+use std::sync::Mutex;
+use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+
+static REBUILD: Mutex<()> = Mutex::new(());
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct MonitorInfo {
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub work_bottom: f32,
+}
+
+struct Mon {
+    name: String,
+    x: i32,
+    y: i32,
+    w: u32,
+    h: u32,
+    scale: f64,
+    work_bottom: f32,
+}
+
+fn monitors(app: &AppHandle) -> Vec<Mon> {
+    app.available_monitors()
+        .unwrap_or_default()
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            let (pos, size, work) = (m.position(), m.size(), m.work_area());
+            let bottom = (work.position.y - pos.y) as f32 + work.size.height as f32;
+            Mon {
+                name: m.name().cloned().filter(|n| !n.is_empty()).unwrap_or_else(|| format!("{}", i + 1)),
+                x: pos.x,
+                y: pos.y,
+                w: size.width,
+                h: size.height,
+                scale: m.scale_factor().max(0.1),
+                work_bottom: (bottom / size.height.max(1) as f32).clamp(0.3, 1.0),
+            }
+        })
+        .collect()
+}
+
+pub fn monitor_infos(app: &AppHandle) -> Vec<MonitorInfo> {
+    monitors(app)
+        .into_iter()
+        .map(|m| MonitorInfo { name: m.name, width: m.w, height: m.h, work_bottom: m.work_bottom })
+        .collect()
+}
+
+/// 선택한 모니터의 작업 영역 비율을 상태에 반영하고 돌려준다.
+pub fn refresh_work_bottom(app: &AppHandle, state: &Shared) -> f32 {
+    let mons = monitors(app);
+    let index = lock(&state.config).display.monitor;
+    let wb = mons.get(index).or(mons.first()).map(|m| m.work_bottom).unwrap_or(0.955);
+    *lock(&state.work_bottom) = wb;
+    wb
+}
+
+pub fn current(app: &AppHandle, state: &Shared) -> Option<WebviewWindow> {
+    let label = lock(&state.stage_label).clone();
+    app.get_webview_window(&label)
+}
+
+/// 편집 모드에 맞춰 클릭 통과를 켜고 끈다 (펫 모드 전용).
+pub fn apply_edit(app: &AppHandle, state: &Shared) {
+    let edit = lock(&state.runtime).edit_mode;
+    if let Some(win) = current(app, state) {
+        let _ = win.set_ignore_cursor_events(!edit);
+        if edit {
+            let _ = win.set_focus();
+        }
+    }
+}
+
+fn build(app: &AppHandle, state: &Shared, mode: Mode) -> Result<WebviewWindow, String> {
+    let mons = monitors(app);
+    let index = lock(&state.config).display.monitor;
+    let mon = mons.get(index).or(mons.first()).ok_or("모니터를 찾지 못했습니다")?;
+    let label = format!("stage-{}", state.stage_seq.fetch_add(1, Ordering::Relaxed));
+    let pet = mode == Mode::Pet;
+
+    let win = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("stage.html".into()))
+        .title("PlushBounce Stage")
+        .transparent(true)
+        .decorations(false)
+        .shadow(false)
+        .resizable(false)
+        .skip_taskbar(true)
+        .always_on_top(pet)
+        .focused(false)
+        // 펫 모드는 처음부터 보이는 창으로 만든다. 나중에 ShowWindow로 직접 띄우면 tao의 내부 상태와
+        // 어긋나서, 클릭 통과를 바꿀 때 창이 다시 숨겨진다.
+        .visible(pet)
+        .position(mon.x as f64 / mon.scale, mon.y as f64 / mon.scale)
+        .inner_size(mon.w as f64 / mon.scale, mon.h as f64 / mon.scale)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let _ = win.set_position(PhysicalPosition::new(mon.x, mon.y));
+    let _ = win.set_size(PhysicalSize::new(mon.w, mon.h));
+    let hwnd = win.hwnd().map_err(|e| e.to_string())?;
+
+    let placed = if pet {
+        let edit = lock(&state.runtime).edit_mode;
+        let _ = win.set_ignore_cursor_events(!edit);
+        Ok(())
+    } else {
+        wallpaper::attach(hwnd, (mon.x, mon.y, mon.w as i32, mon.h as i32))
+    };
+    if let Err(e) = placed {
+        let _ = win.destroy();
+        return Err(e);
+    }
+    Ok(win)
+}
+
+/// 현재 설정의 모드·모니터에 맞는 stage 창을 새로 만들고 이전 창을 닫는다.
+/// 바탕화면 모드가 실패하면 오류를 표시하고 펫 모드로 되돌린다.
+pub fn rebuild(app: &AppHandle, state: &Shared) {
+    let _guard = lock(&REBUILD);
+    refresh_work_bottom(app, state);
+    let mode = lock(&state.config).display.mode;
+    if mode == Mode::Wallpaper && lock(&state.runtime).edit_mode {
+        state.update_runtime(app, |r| r.edit_mode = false);
+    }
+    let old = current(app, state);
+
+    let result = match build(app, state, mode) {
+        Ok(win) => {
+            if lock(&state.runtime).display_error.is_some() && mode == Mode::Wallpaper {
+                state.update_runtime(app, |r| r.display_error = None);
+            }
+            Ok(win)
+        }
+        Err(e) if mode == Mode::Wallpaper => {
+            state.update_runtime(app, |r| {
+                r.display_error = Some(format!("바탕화면 모드를 켜지 못해 펫 모드로 돌아갑니다. ({e})"));
+            });
+            lock(&state.config).display.mode = Mode::Pet;
+            state.broadcast_config(app, "rust");
+            build(app, state, Mode::Pet)
+        }
+        Err(e) => Err(e),
+    };
+    match result {
+        Ok(win) => {
+            *lock(&state.stage_label) = win.label().to_string();
+            if let Some(old) = old {
+                let _ = old.destroy();
+            }
+        }
+        Err(e) => state.update_runtime(app, |r| r.display_error = Some(format!("인형 창을 만들지 못했습니다. ({e})"))),
+    }
+}

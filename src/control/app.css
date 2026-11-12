@@ -1,0 +1,227 @@
+:root {
+  --bg: #14161d;
+  --panel: #1c1f29;
+  --raised: #262a37;
+  --line: #333848;
+  --text: #e8eaf1;
+  --dim: #8e94a8;
+  --accent: #ffd166;
+  --danger: #ff6b6b;
+  color-scheme: dark;
+  font-family: "Pretendard", "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+  font-size: 13px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition:
+    background-color 0.12s,
+    border-color 0.12s,
+    color 0.12s,
+    opacity 0.12s,
+    transform 0.08s;
+}
+button:hover:not(:disabled) {
+  border-color: #4a5068;
+}
+/* 누르는 순간 살짝 눌리는 느낌 */
+button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+button.on {
+  background: #3a3524;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+select,
+input[type="number"] {
+  font: inherit;
+  color: inherit;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+input[type="number"] {
+  width: 76px;
+}
+
+/* 슬라이더: 가는 트랙, 지금 값까지 채워진 색(--p = 0..1, Slider.svelte가 넣는다), 둥근 손잡이 */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  min-width: 80px;
+  height: 20px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 4px;
+  background: linear-gradient(to right, var(--accent) 0 calc(var(--p, 0) * 100%), var(--raised) calc(var(--p, 0) * 100%) 100%);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+  box-shadow: 0 0 0 0 rgba(255, 209, 102, 0);
+  transition:
+    transform 0.12s,
+    box-shadow 0.12s;
+}
+input[type="range"]:hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 5px rgba(255, 209, 102, 0.16);
+}
+input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 7px rgba(255, 209, 102, 0.2);
+}
+input[type="range"]:focus-visible {
+  outline: none;
+}
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--accent);
+}
+
+/* 스크롤바: 화살표 없이 가늘고 어둡게 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #3a4052;
+  border-radius: 10px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: #4f566c;
+}
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+/* 탭을 바꾸거나 설정 묶음이 새로 나타날 때 살짝 떠오르며 */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+input[type="color"] {
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: none;
+}
+
+label.field {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  align-items: center;
+  gap: 8px;
+  color: var(--dim);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow: hidden;
+}
+.seg button {
+  border: 0;
+  border-radius: 0;
+  background: var(--panel);
+  padding: 6px 10px;
+}
+.seg button + button {
+  border-left: 1px solid var(--line);
+}
+.seg button.on {
+  background: #3a3524;
+}
+
+details {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+summary {
+  cursor: pointer;
+  color: var(--dim);
+  width: fit-content;
+  border-radius: 4px;
+}
+details[open] > summary {
+  margin-bottom: 10px;
+}
+
+svg.icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
