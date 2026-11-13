@@ -82,8 +82,13 @@
         ctx.beginPath();
         ctx.moveTo(x0, y + ROW_H);
         for (const s of history.energy) ctx.lineTo(X(s.t), y + ROW_H - 2 - s.e[b] * (ROW_H - 4));
+        // 다음 프레임이 올 때까지 마지막 값을 "지금"까지 이어 그린다 (끝이 물러났다 튀어나오며 떨리지 않게).
         const last = history.energy[history.energy.length - 1];
-        if (last) ctx.lineTo(X(last.t), y + ROW_H);
+        if (last) {
+          const ly = y + ROW_H - 2 - last.e[b] * (ROW_H - 4);
+          ctx.lineTo(X(now), ly);
+          ctx.lineTo(X(now), y + ROW_H);
+        }
         ctx.closePath();
         ctx.globalAlpha = 0.22;
         ctx.fillStyle = color;
@@ -105,11 +110,13 @@
         ctx.fill();
       }
 
-      // 역치 아래(무음) 구간은 어둡게
+      // 역치 아래(무음) 구간은 어둡게. 무음 중에는 프레임이 0.1초마다만 와서, 마지막 구간을 프레임 시각에서
+      // 끊으면 오른쪽 끝에 밝은 틈이 열렸다 닫혔다 하며 떨린다 → 무음이 이어지는 동안은 "지금"까지 칠한다.
       ctx.fillStyle = "rgba(10,11,16,0.55)";
+      const lastSilent = history.silent[history.silent.length - 1];
       for (const s of history.silent) {
         const a = X(s.from - 60);
-        const z = X(s.to + 60);
+        const z = s === lastSilent && history.silentNow ? X(now) + 1 : X(s.to + 60);
         ctx.fillRect(a, 0, z - a, lanesBottom);
       }
       ctx.restore();

@@ -257,3 +257,71 @@ describe("Pulse (react to every sound)", () => {
     expect(Math.min(...xs.slice(12, 22))).toBeLessThan(-0.85);
   });
 });
+
+describe("Spring locked to the analysed beat (sync / energize)", () => {
+  /** 분석의 박(beatSteps)마다 sync, 소리(hitSteps)마다 energize. 박마다 인형이 HIT_PHASE에서 몇 ms 어긋났는지. */
+  function locked(beatSteps: number[], hitSteps: number[], steps: number, periodS = 0.5) {
+    const s = new Spring();
+    const beatSet = new Set(beatSteps);
+    const hitSet = new Set(hitSteps);
+    let lastBeat = -1;
+    const errMs: number[] = [];
+    for (let i = 0; i < steps; i++) {
+      if (hitSet.has(i)) s.energize(1, periodS, lastBeat < 0 ? 0 : (i - lastBeat) * DT);
+      if (beatSet.has(i)) {
+        if (s_period(s) && i > 0) {
+          const p = s.beatPosition - HIT_PHASE;
+          errMs.push((p - Math.round(p)) * s_period(s) * 1000);
+        }
+        s.sync(periodS);
+        lastBeat = i;
+      }
+      s.step(DT);
+    }
+    return errMs;
+  }
+
+  it("squashes exactly on every analysed beat even when the band's sound is off the beat", () => {
+    // 박은 0.5초마다, 이 인형의 소리는 늘 박보다 70ms 늦게 (엇나간 감지).
+    const beatsAt = beats(0, 2400);
+    const errMs = locked(beatsAt, beatsAt.map((b) => b + 8), 2400);
+    // 첫 박 뒤로는 박 시점마다 인형이 가장 쭈그러진 자리에 있다.
+    expect(absMax(errMs.slice(3))).toBeLessThan(3);
+  });
+
+  it("follows a tempo change of the beat immediately", () => {
+    // 120BPM → 100BPM(72스텝). 박 간격과 함께 박 시계를 그대로 따른다.
+    const b1 = beats(0, 1200);
+    const b2 = beats(1200, 2640, 72);
+    const errMs2 = (() => {
+      const s = new Spring();
+      const set1 = new Set(b1);
+      const set2 = new Set(b2);
+      const out: number[] = [];
+      for (let i = 0; i < 2640; i++) {
+        const isBeat = set1.has(i) || set2.has(i);
+        const per = set2.has(i) ? 0.6 : 0.5;
+        if (isBeat) {
+          if (i > 0) {
+            const p = s.beatPosition - HIT_PHASE;
+            out.push((p - Math.round(p)) * s_period(s) * 1000);
+          }
+          s.energize(1, per, 0);
+          s.sync(per);
+        }
+        s.step(DT);
+      }
+      return out;
+    })();
+    // 박 간격(0.6초)을 함께 주면 바뀐 직후부터 거의 오차가 없다.
+    expect(absMax(errMs2.slice(21))).toBeLessThan(3);
+  });
+
+  it("starts on the beat clock when the sound arrives between beats", () => {
+    const s = new Spring();
+    // 박 뒤 0.25초(반 박)에 처음 소리가 왔다 → 인형은 박 시계의 그 자리에서 시작한다.
+    s.energize(1, 0.5, 0.25);
+    const p = s.beatPosition - HIT_PHASE;
+    expect(p - Math.floor(p)).toBeCloseTo(0.5, 5);
+  });
+});

@@ -32,6 +32,8 @@ export const history = {
   energy: [] as { t: number; e: Record<BandId, number> }[],
   /** 역치 아래(무음)였던 구간의 시작·끝. */
   silent: [] as { from: number; to: number }[],
+  /** 마지막으로 받은 프레임이 무음이었는가: 그렇다면 무음 구간은 다음 프레임까지 "지금"까지 이어진다. */
+  silentNow: false,
 };
 
 function record(f: AudioFrame, now: number): void {
@@ -48,6 +50,7 @@ function record(f: AudioFrame, now: number): void {
   history.energy.push({ t: now, e });
   while (history.energy.length && history.energy[0].t < old) history.energy.shift();
   const last = history.silent[history.silent.length - 1];
+  history.silentNow = f.silent;
   if (f.silent) {
     if (last && now - last.to < 200) last.to = now;
     else history.silent.push({ from: now, to: now });

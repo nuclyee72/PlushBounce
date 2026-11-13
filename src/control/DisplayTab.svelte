@@ -4,7 +4,6 @@
   import { onMount } from "svelte";
   import { api } from "../shared/api";
   import Icon from "./Icon.svelte";
-  import Slider from "./Slider.svelte";
   import { app, commit, fail } from "./store.svelte";
 
   const cfg = $derived(app.cfg!);
@@ -82,8 +81,6 @@
   </div>
 {/if}
 
-<label class="field">크기<Slider min={0.3} max={3} step={0.01} value={cfg.display.globalScale} oninput={(v) => commit((c) => (c.display.globalScale = v))} /></label>
-
 <div class="row">
   <button class:on={autostart} onclick={toggleAutostart}><Icon name="power" />시작 시 실행</button>
   <span class="spacer"></span>
@@ -104,8 +101,5 @@
   }
   .spacer {
     flex: 1;
-  }
-  label.field {
-    max-width: 420px;
   }
 </style>

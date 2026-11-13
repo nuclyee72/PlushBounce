@@ -30,13 +30,6 @@ const LEVEL_SNAP_PX = 7;
 const SNAP_DIST = 0.04;
 /** 이미 선에 붙어 있으면 이만큼 멀어져야 떨어진다 (선을 따라 좌우로 끌 때 미끄러지듯). */
 const SNAP_KEEP = 0.08;
-/**
- * 박자 인형의 박 맞추기 (사용자 요청: 이전 박을 반영한 보정을 크게).
- * 박이 잡혀 있으면 박(중음·고음은 반박) 격자에서 이만큼(박 단위, 최대 GRID_ALIGN_MAX_MS) 안의 소리를
- * 격자 위에서 들은 것으로 친다 → 대역이 달라도 같은 박에 함께 뛴다.
- */
-const GRID_ALIGN_BEATS = 0.2;
-const GRID_ALIGN_MAX_MS = 110;
 /** 박을 아직 모를 때: 다른 대역의 소리가 이만큼(ms) 안에 함께 오면 같은 타격으로 본다. */
 const CLUSTER_MS = 80;
 /** "모든 소리" 인형이 다시 움직이기까지의 최소 간격(ms). */
@@ -241,14 +234,21 @@ export class StageRenderer {
       if (f.bands[b].onset) this.pending[b] = Math.max(this.pending[b], f.bands[b].strength);
     }
 
+    // 박을 알면 박자 인형은 모두 분석이 찾은 박(타임라인의 박 줄)에 위상을 맞춘다.
+    // 자기 소리는 "움직일지·얼마나"만 정하고, "언제"는 박이 정한다.
+    const beatNow = f.tempo?.beat === true;
+    const sinceBeat = this.clock.lastBeat > 0 ? (now - this.clock.lastBeat) / 1000 : 0;
     for (const d of this.drawOrder) {
       const s = this.sprites.get(d.id);
       if (!s) continue;
       const want = this.bands.get(d.id) ?? d.band;
       if (want === "beat") {
         // 박: 추정된 박마다 (대역과 상관없이). 박을 아직 모르면 전체 소리를 박처럼 걸러서 따른다.
-        if (f.tempo) {
-          if (f.tempo.beat) s.bounce(Math.max(0.7, this.pending.full), period, now, 0, lag);
+        if (f.tempo && period) {
+          if (beatNow) {
+            s.energize(Math.max(0.7, this.pending.full), period, 0, now, lag);
+            s.spring.sync(period);
+          }
         } else if (f.bands.full.onset && shouldBounce(now, s.acceptedAt, "full", f.bands.full.strength, this.clock)) {
           s.bounce(f.bands.full.strength, null, now, this.align("full", now), lag);
         }
@@ -261,12 +261,18 @@ export class StageRenderer {
         if (b.onset && now - s.acceptedAt >= PULSE_GAP_MS) s.hit(b.strength, now, lag);
         continue;
       }
-      if (tempoMode) {
-        // 박자 고정: 박에만. 전체 인형은 매 박, 나머지는 직전 한 박 안에 자기 소리가 있었을 때.
-        if (f.tempo!.beat && (band === "full" || this.pending[band] > 0)) s.bounce(this.pending[band], period, now, 0, lag);
+      if (f.tempo && period) {
+        if (tempoMode) {
+          // 박자 고정: 박에만. 전체 인형은 매 박, 나머지는 직전 한 박 안에 자기 소리가 있었을 때.
+          if (beatNow && (band === "full" || this.pending[band] > 0)) s.energize(this.pending[band], period, 0, now, lag);
+        } else if (b.onset && shouldBounce(now, s.acceptedAt, band, b.strength, this.clock)) {
+          // 박자: 박에 맞는 자기 소리가 들리는 동안 움직인다. 움직이는 시점은 박 시계.
+          s.energize(b.strength, period, sinceBeat, now, lag);
+        }
+        if (beatNow) s.spring.sync(period);
         continue;
       }
-      // 박자: 자기 대역의 소리에 반응하되, 박이 잡혀 있으면 박에 맞는 소리에만 한 박에 한 번.
+      // 박을 모를 때: 자기 대역의 소리를 따라 스스로 박을 찾는다.
       if (b.onset && shouldBounce(now, s.acceptedAt, band, b.strength, this.clock)) {
         s.bounce(b.strength, period, now, this.align(band, now), lag);
       }
@@ -275,21 +281,11 @@ export class StageRenderer {
   }
 
   /**
-   * 박자 인형의 박 맞추기. 돌려주는 값: 이 소리를 몇 초 앞서 들은 것으로 칠지 (음수 = 곧 올 박에 속함).
-   *  - 박이 잡혀 있으면: 지금까지의 박으로 만든 격자(중음·고음은 반박 격자)에서 0.2박(최대 110ms) 안의 소리는
-   *    격자 위에서 들은 것으로 친다. 대역마다 감지가 몇십 ms씩 달라도 모든 인형이 같은 박에 함께 뛴다.
-   *  - 박을 모르면: 다른 대역의 소리가 80ms 안에 먼저 왔을 때 같은 타격으로 보고 그 순간에 맞춘다.
-   * 그보다 멀리 떨어진 소리(엇박 하이햇 등)는 그대로 둔다.
+   * 박을 아직 모를 때의 맞추기. 돌려주는 값: 이 소리를 몇 초 앞서 들은 것으로 칠지.
+   * 다른 대역의 소리가 80ms 안에 먼저 왔을 때 같은 타격으로 보고 그 순간에 맞춘다
+   * (대역마다 감지가 몇십 ms씩 달라도 함께 뛴다). 박을 알 때는 모두 박 시계를 따르므로 쓰지 않는다.
    */
   private align(band: BandId, now: number): number {
-    const { period: p, lastBeat } = this.clock;
-    if (p && lastBeat > 0) {
-      const grid = band === "mid" || band === "high" ? 0.5 : 1;
-      const pos = (now - lastBeat) / p / grid;
-      const off = (pos - Math.round(pos)) * grid * p;
-      if (Math.abs(off) <= Math.min(GRID_ALIGN_BEATS * p, GRID_ALIGN_MAX_MS)) return off / 1000;
-      return 0;
-    }
     const h = this.lastHit;
     if (h && now - h.t <= CLUSTER_MS) return h.band === band ? 0 : (now - h.t) / 1000;
     this.lastHit = { t: now, band };

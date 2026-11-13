@@ -223,20 +223,11 @@
     </div>
   </div>
 
+  <!-- 타이밍 줄 아래는 모두 한 덩어리로 스크롤된다 (인형 목록은 따로 스크롤하지 않고 줄을 바꿔 늘어선다). -->
+  <div class="scroll">
   <div class="sliders">
     <!-- 끄는 동안 미리보기 인형이 계속 꿍실거려서 결과가 바로 보인다. -->
     <label class="field">깊이<Slider lo="살짝" hi="푹" min={0} max={0.4} step={0.005} value={cfg.motion.amount} oninput={(v) => motion((c) => (c.motion.amount = v))} /></label>
-    {#if selected}
-      {@const s = selected}
-      <label class="field">
-        이 인형
-        {#if s.manual.layout}
-          <Slider lo="작게" hi="크게" min={0.02} max={0.8} step={0.002} value={s.scale} oninput={(v) => edit(s.id, (d) => (d.scale = v))} />
-        {:else}
-          <Slider lo="작게" hi="크게" min={0.2} max={4} step={0.01} value={s.size} oninput={(v) => edit(s.id, (d) => (d.size = v))} />
-        {/if}
-      </label>
-    {/if}
   </div>
 
   <!-- 선: 고르기·추가·삭제. 아래 속성은 고른 선의 것이다(선마다 따로 저장된다). -->
@@ -358,8 +349,19 @@
       </div>
     </section>
   {/if}
+  </div>
 
 <style>
+  .scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    /* 고른 인형의 테두리(outline)가 잘리지 않게 */
+    padding: 4px 4px 4px 2px;
+  }
   .drop {
     width: 100%;
     height: 100%;
@@ -477,9 +479,9 @@
   }
   .strip {
     display: flex;
+    flex-wrap: wrap;
     gap: 10px;
     padding: 8px;
-    overflow-x: auto;
     border: 2px dashed transparent;
     border-radius: 12px;
     background: var(--panel);

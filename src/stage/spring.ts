@@ -19,6 +19,8 @@ export class Spring {
   private sinceKick = Infinity;
   /** 아직 반영하지 않은 위상 보정. 한 번에 넣지 않고 천천히 녹인다. */
   private correction = 0;
+  /** 위상 보정을 녹이는 시간(초). 분석의 박에 맞출 때는 더 빨리. */
+  private correctS = CORRECT_S;
   /** 멈춘 자세에서 처음 시작할 때(또는 다시 맞출 때)의 틈을 메우는 값. */
   private offset = 0;
   /** 연속으로 박과 동떨어져 들어온 소리 수. */
@@ -106,6 +108,43 @@ export class Spring {
 
     // 위상: 일부만 끌어당긴다.
     this.correction = -err * PHASE_GAIN;
+    this.correctS = CORRECT_S;
+  }
+
+  /**
+   * 분석이 찾은 박이 지금 왔다: 인형의 박을 그 박에 완전히 맞춘다 (지금이 가장 쭈그러진 자리,
+   * 주기 = 박 간격). 박을 알 때는 박자 인형이 모두 이것만 따른다 — 박 기록과 인형이 같은 박에 움직인다.
+   * 멈춰 있는 인형은 움직이게 하지 않는다 (그건 energize).
+   */
+  sync(periodS: number): void {
+    this.period = clampPeriod(periodS);
+    if (!this.running) return;
+    const f = this.phase - Math.floor(this.phase) - HIT_PHASE;
+    this.correction = -(f - Math.round(f));
+    this.correctS = SYNC_CORRECT_S;
+    this.offGrid = 0;
+    this.mismatch = 0;
+  }
+
+  /**
+   * 박을 알 때 자기 소리가 들렸다: 위상은 건드리지 않고 움직일 힘(진폭)만 채운다.
+   * 멈춰 있었다면 박 시계의 자리(sinceBeatS = 직전 박에서 지난 초)에서 시작한다.
+   */
+  energize(strength: number, periodS: number, sinceBeatS: number): void {
+    this.sinceKick = 0;
+    this.hushed = false;
+    this.ampTarget = 0.85 + 0.15 * Math.min(1, Math.max(0, strength));
+    if (this.running) return;
+    this.running = true;
+    this.period = clampPeriod(periodS);
+    this.phase = HIT_PHASE + Math.max(0, sinceBeatS) / this.period;
+    this.amp = this.ampTarget;
+    this.correction = 0;
+    this.offGrid = 0;
+    this.mismatch = 0;
+    this.lastInterval = Infinity;
+    this.locked = 0;
+    this.offset = this.x - this.pose(this.phase) * this.amp;
   }
 
   /** 인형의 박을 지금 소리에 바로 맞춘다. 모양이 튀지 않게 틈은 offset으로 메운다. */
@@ -135,7 +174,7 @@ export class Spring {
     const d = Math.min(dt, 0.1);
     this.sinceKick += d;
     if (this.running) {
-      const c = this.correction * (1 - Math.exp(-d / CORRECT_S));
+      const c = this.correction * (1 - Math.exp(-d / this.correctS));
       this.correction -= c;
       this.phase += d / this.period + c;
       // 소리가 몇 박 동안 없거나 아예 끊기면 그때부터 잦아든다.
@@ -192,6 +231,8 @@ const LOCK_BEATS = 6;
 const MAX_ERR = 0.3;
 /** 위상 보정을 녹이는 시간(초). */
 const CORRECT_S = 0.12;
+/** 분석의 박에 맞출 때 위상 보정을 녹이는 시간(초). 박마다 오차를 거의 다 없앤다. */
+const SYNC_CORRECT_S = 0.04;
 /** 소리가 이만큼(박 수) 없어도 그대로 돈다 (박 하나가 빠져도 모양이 그대로다). */
 const HOLD_BEATS = 2.5;
 /** 그 뒤 잦아드는 시간(박 수). */

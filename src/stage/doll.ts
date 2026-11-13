@@ -37,6 +37,13 @@ export class DollSprite {
     this.flashAt = now + Math.max(0, lagS) * 1000;
   }
 
+  /** 박을 알 때 자기 소리가 들렸다: 박 시계의 자리에서 움직인다 (위상은 박이 정한다). */
+  energize(strength: number, periodS: number, sinceBeatS: number, now: number, lagS = 0): void {
+    this.spring.energize(strength, periodS, sinceBeatS);
+    this.acceptedAt = now;
+    this.flashAt = now + Math.max(0, lagS) * 1000;
+  }
+
   /** "모든 소리": 박 예측 없이 바로 쭈그러진다. */
   hit(strength: number, now: number, lagS = 0): void {
     this.pulse.hit(strength, lagS);
