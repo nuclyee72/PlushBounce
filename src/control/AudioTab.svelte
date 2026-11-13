@@ -4,6 +4,7 @@
   import Icon from "./Icon.svelte";
   import Slider from "./Slider.svelte";
   import Timeline from "./Timeline.svelte";
+  import Timing from "./Timing.svelte";
   import { app, commit, live, refreshSessions } from "./store.svelte";
 
   const cfg = $derived(app.cfg!);
@@ -48,23 +49,24 @@
 </script>
 
 <!-- 소리 소스: 시스템 전체, 또는 켠(O) 앱들의 소리만 합쳐서 -->
-<div class="sources" role="group" aria-label="소리 소스">
+<div class="sources" role="group" aria-label="Sound source">
   <button class="src" class:on={chosen.length === 0} aria-pressed={chosen.length === 0} onclick={() => commit((c) => (c.audio.source = { kind: "system" }))}>
-    <Icon name="speaker" />전체 시스템
+    <Icon name="speaker" />Whole system
   </button>
   {#each options as o (o.name.toLowerCase())}
     {@const on = isOn(o.name)}
-    <button class="src app" class:on class:gone={!o.running} aria-pressed={on} title={o.running ? o.name : `${o.name} (꺼져 있음)`} onclick={() => toggleApp(o.name)}>
+    <button class="src app" class:on class:gone={!o.running} aria-pressed={on} title={o.running ? o.name : `${o.name} (not running)`} onclick={() => toggleApp(o.name)}>
       <span class="ox" class:o={on}><Icon name={on ? "circle" : "x"} /></span>{o.label}
     </button>
   {/each}
-  <button class="refresh" aria-label="새로고침" title="새로고침" onclick={refreshSessions}><Icon name="refresh" /></button>
+  <button class="refresh" aria-label="Refresh" title="Refresh" onclick={refreshSessions}><Icon name="refresh" /></button>
   <span class="bpm" style="opacity:{live.bpm ? 0.55 + 0.45 * live.beat : 0.35}">{live.bpm ?? "–"} <small>BPM</small></span>
 </div>
 
-<!-- 역치: 막대가 입력 크기, 손잡이가 기준선. 기준선보다 작은 소리에는 인형이 반응하지 않는다. -->
+<!-- 역치: 막대가 입력 크기, 손잡이가 기준선. 기준선보다 작은 소리에는 인형이 반응하지 않는다.
+     같은 줄 오른쪽: 타이밍(모든 인형 공통 지연 보정). -->
 <div class="gate">
-  <span class="name">역치</span>
+  <span class="name">Gate</span>
   <div class="track">
     <div class="input" class:under={live.input < cfg.audio.gateDb} style="width:{pct(live.input)}%"></div>
     <div class="cut" style="width:{pct(cfg.audio.gateDb)}%"></div>
@@ -73,42 +75,43 @@
       min={GATE_MIN}
       max={GATE_MAX}
       step="1"
-      aria-label="역치"
+      aria-label="Gate"
       bind:this={gateEl}
       oninput={(e) => commit((c) => (c.audio.gateDb = +e.currentTarget.value))}
     />
   </div>
-  <span class="ends" aria-hidden="true"><span>작은 소리도</span><span>큰 소리만</span></span>
+  <span class="timing-slot"><Timing /></span>
+  <span class="ends" aria-hidden="true"><span>Quiet sounds too</span><span>Loud only</span></span>
 </div>
 
 <!-- 최근 감지 기록: 대역마다 언제 소리가 잡혔는지 (막대 = 감지, 높이 = 세기, 옅은 면 = 크기) -->
 <Timeline />
 
 <div class="grid">
-  <span></span><span class="head">감도<small>둔하게 ↔ 예민하게</small></span><span class="head">Hz</span>
+  <span></span><span class="head">Sensitivity<small>less ↔ more</small></span><span class="head">Hz</span>
   {#each BAND_IDS as b}
     <span class="name" style="--band:{BAND_COLORS[b]}"><i></i>{BAND_LABELS[b]}</span>
-    <Slider min={1} max={4} step={0.05} label="{BAND_LABELS[b]} 감도" value={toSlider(cfg.audio.bands[b].sensitivity)} oninput={(v) => setBand(b, "sensitivity", 5 - v)} />
+    <Slider min={1} max={4} step={0.05} label="{BAND_LABELS[b]} sensitivity" value={toSlider(cfg.audio.bands[b].sensitivity)} oninput={(v) => setBand(b, "sensitivity", 5 - v)} />
     <span class="hz">
-      <input type="number" min="20" max="19000" aria-label="{BAND_LABELS[b]} 시작" value={cfg.audio.bands[b].lo} onchange={(e) => setBand(b, "lo", e.currentTarget.valueAsNumber)} />
+      <input type="number" min="20" max="19000" aria-label="{BAND_LABELS[b]} from" value={cfg.audio.bands[b].lo} onchange={(e) => setBand(b, "lo", e.currentTarget.valueAsNumber)} />
       –
-      <input type="number" min="21" max="20000" aria-label="{BAND_LABELS[b]} 끝" value={cfg.audio.bands[b].hi} onchange={(e) => setBand(b, "hi", e.currentTarget.valueAsNumber)} />
+      <input type="number" min="21" max="20000" aria-label="{BAND_LABELS[b]} to" value={cfg.audio.bands[b].hi} onchange={(e) => setBand(b, "hi", e.currentTarget.valueAsNumber)} />
     </span>
   {/each}
   <!-- 간격: 한 대역에서 소리를 다시 잡기까지의 최소 시간. 자동이면 박에 맞춘다(16분음표보다 조금 짧게). 손으로 끌면 자동이 꺼진다. -->
-  <span class="name">간격</span>
+  <span class="name">Gap</span>
   <span class="gaprow">
-    <button class="auto" class:on={autoGap} aria-pressed={autoGap} title="간격 자동" aria-label="간격 자동" onclick={() => commit((c) => (c.audio.autoInterval = !autoGap))}
-      >자동</button
+    <button class="auto" class:on={autoGap} aria-pressed={autoGap} title="Auto gap" aria-label="Auto gap" onclick={() => commit((c) => (c.audio.autoInterval = !autoGap))}
+      >Auto</button
     >
     <span class="gapslider" class:muted={autoGap}>
       <Slider
         min={40}
         max={400}
         step={5}
-        lo="촘촘히"
-        hi="띄엄띄엄"
-        label="최소 온셋 간격"
+        lo="Dense"
+        hi="Sparse"
+        label="Minimum onset gap"
         value={autoGap ? (live.gapMs ?? cfg.audio.minOnsetIntervalMs) : cfg.audio.minOnsetIntervalMs}
         oninput={(v) => commit((c) => ((c.audio.minOnsetIntervalMs = v), (c.audio.autoInterval = false)))}
       />
@@ -170,9 +173,15 @@
     font-size: 11px;
     color: var(--dim);
   }
+  .timing-slot {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    align-self: start;
+    margin-left: 6px;
+  }
   .gate {
     display: grid;
-    grid-template-columns: 48px 1fr;
+    grid-template-columns: 70px 1fr auto;
     align-items: center;
     gap: 2px 8px;
   }

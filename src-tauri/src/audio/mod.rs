@@ -96,7 +96,7 @@ impl Merged {
 }
 
 fn panic_text(p: Box<dyn std::any::Any + Send>) -> String {
-    p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_else(|| "알 수 없는 오류".into())
+    p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_else(|| "unknown error".into())
 }
 
 fn set_error(app: &AppHandle, state: &Shared, error: Option<String>) {
@@ -115,7 +115,7 @@ pub fn start(app: AppHandle, state: Shared) {
             // 분석이 panic해도 앱은 살아 있고, 상태를 표시한 뒤 다시 시작한다.
             match catch_unwind(AssertUnwindSafe(|| analysis_loop(&app, &state, &rx))) {
                 Ok(()) => return, // 캡처 쪽이 사라짐 = 앱 종료
-                Err(p) => set_error(&app, &state, Some(format!("소리 분석이 멈춰 다시 시작합니다: {}", panic_text(p)))),
+                Err(p) => set_error(&app, &state, Some(format!("Sound analysis stopped; restarting: {}", panic_text(p)))),
             }
             std::thread::sleep(Duration::from_millis(500));
         });
@@ -127,10 +127,10 @@ pub fn start(app: AppHandle, state: Shared) {
         match result {
             Ok(Ok(())) => continue, // 소스·장치 변경: 바로 다시 연결
             Ok(Err(e)) => {
-                let msg = if e.contains("실행 중이 아닙니다") { e } else { format!("소리를 캡처하지 못했습니다. 출력 장치를 확인하세요. ({e})") };
+                let msg = if e.contains("not running") { e } else { format!("Couldn't capture sound. Check your output device. ({e})") };
                 set_error(&app, &state, Some(msg));
             }
-            Err(p) => set_error(&app, &state, Some(format!("소리 캡처가 멈춰 다시 시작합니다: {}", panic_text(p)))),
+            Err(p) => set_error(&app, &state, Some(format!("Sound capture stopped; restarting: {}", panic_text(p)))),
         }
         std::thread::sleep(Duration::from_millis(1000));
     });

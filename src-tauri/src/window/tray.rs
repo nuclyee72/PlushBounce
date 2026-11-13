@@ -14,17 +14,17 @@ pub struct TrayItems {
 
 fn mode_text(mode: Mode) -> &'static str {
     match mode {
-        Mode::Pet => "바탕화면 모드로 전환",
-        Mode::Wallpaper => "펫 모드로 전환",
+        Mode::Pet => "Switch to wallpaper mode",
+        Mode::Wallpaper => "Switch to pet mode",
     }
 }
 
 pub fn build(app: &AppHandle, state: &Shared) -> tauri::Result<()> {
     let mode = lock(&state.config).display.mode;
-    let open = MenuItem::with_id(app, "open", "조작 창 열기", true, None::<&str>)?;
-    let edit = CheckMenuItem::with_id(app, "edit", "편집 모드", mode == Mode::Pet, false, Some("Ctrl+Alt+P"))?;
+    let open = MenuItem::with_id(app, "open", "Open controls", true, None::<&str>)?;
+    let edit = CheckMenuItem::with_id(app, "edit", "Edit mode", mode == Mode::Pet, false, Some("Ctrl+Alt+P"))?;
     let mode_item = MenuItem::with_id(app, "mode", mode_text(mode), true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&open, &edit, &mode_item, &sep, &quit])?;
 

@@ -154,7 +154,7 @@
       ctx.fill();
       ctx.globalAlpha = 1;
       ctx.fillStyle = text;
-      ctx.fillText("박", 20, beatY);
+      ctx.fillText("Beat", 20, beatY);
 
       // 시간 눈금
       ctx.fillStyle = dim;
@@ -163,7 +163,7 @@
       for (let s = 0; s <= WINDOW_MS / 1000; s++) {
         const x = x0 + (1 - (s * 1000) / WINDOW_MS) * laneW;
         ctx.textAlign = s === 0 ? "right" : "center";
-        ctx.fillText(s === 0 ? "지금" : `-${s}s`, s === 0 ? x0 + laneW : x, h - 3);
+        ctx.fillText(s === 0 ? "now" : `-${s}s`, s === 0 ? x0 + laneW : x, h - 3);
       }
       ctx.textAlign = "left";
     };
@@ -177,7 +177,7 @@
 
 <div class="timeline">
   <div bind:this={wrap}>
-    <canvas bind:this={canvas} aria-label="최근 감지 기록"></canvas>
+    <canvas bind:this={canvas} aria-label="Recent detections"></canvas>
   </div>
 </div>
 

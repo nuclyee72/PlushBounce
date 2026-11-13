@@ -10,18 +10,18 @@ export const BAND_COLORS: Record<BandId, string> = {
 };
 
 export const BAND_LABELS: Record<BandId, string> = {
-  kick: "킥",
-  bass: "베이스",
-  mid: "중음",
-  high: "고음",
-  full: "전체",
+  kick: "Kick",
+  bass: "Bass",
+  mid: "Mid",
+  high: "High",
+  full: "Full",
 };
 
 /** 인형이 따르는 대역: 분석 대역 + 인형 전용 "beat"(추정된 박마다, 반응 방식은 늘 박자). */
 export type DollBand = BandId | "beat";
 export const DOLL_BANDS: DollBand[] = [...BAND_IDS, "beat"];
 export const DOLL_BAND_COLORS: Record<DollBand, string> = { ...BAND_COLORS, beat: "#ffd166" };
-export const DOLL_BAND_LABELS: Record<DollBand, string> = { ...BAND_LABELS, beat: "박" };
+export const DOLL_BAND_LABELS: Record<DollBand, string> = { ...BAND_LABELS, beat: "Beat" };
 
 /**
  * 인형이 자기 대역의 소리에 반응하는 방식 (대역과 따로 정한다).
@@ -30,7 +30,7 @@ export const DOLL_BAND_LABELS: Record<DollBand, string> = { ...BAND_LABELS, beat
  */
 export type React = "beat" | "every";
 export const REACTS: React[] = ["beat", "every"];
-export const REACT_LABELS: Record<React, string> = { beat: "박자", every: "모든 소리" };
+export const REACT_LABELS: Record<React, string> = { beat: "Beat", every: "Every sound" };
 
 /** 인형으로 넣을 수 있는 이미지 확장자 (Rust의 images::EXTENSIONS와 같다). */
 export const DOLL_EXTENSIONS = [

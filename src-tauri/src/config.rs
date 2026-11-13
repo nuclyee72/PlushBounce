@@ -283,6 +283,10 @@ impl Config {
 
     /// 값의 범위를 바로잡고, 순서를 다시 매기고, 자동 대역을 배정한다.
     pub fn normalize(&mut self) {
+        // 배정 방식·트리거 방식 버튼은 없앴다(2026-11-13): 박자 인형이 모두 박에 맞춰 움직이게 되면서
+        // 차이가 거의 없어졌다. 예전 파일의 값은 읽되 늘 따로(spread)·소리마다(onset)로 쓴다.
+        self.motion.assign = Assign::Spread;
+        self.motion.sync = Sync::Onset;
         let fix = |v: &mut f32, lo: f32, hi: f32, default: f32| {
             *v = if v.is_finite() { v.clamp(lo, hi) } else { default };
         };
@@ -535,9 +539,13 @@ mod tests {
         let bands: Vec<BandId> = c.dolls.iter().map(|d| d.band).collect();
         assert_eq!(bands, [BandId::Kick, BandId::High, BandId::Bass, BandId::High, BandId::Kick]);
 
+        // 예전 파일의 "함께"·"박자 고정"은 읽을 때 따로·소리마다로 바뀐다 (버튼을 없앴다).
         c.motion.assign = Assign::Together;
+        c.motion.sync = Sync::Tempo;
         c.normalize();
-        assert!(c.dolls.iter().enumerate().all(|(i, d)| i == 1 || d.band == BandId::Full));
+        assert_eq!((c.motion.assign, c.motion.sync), (Assign::Spread, Sync::Onset));
+        let bands: Vec<BandId> = c.dolls.iter().map(|d| d.band).collect();
+        assert_eq!(bands, [BandId::Kick, BandId::High, BandId::Bass, BandId::High, BandId::Kick]);
     }
 
     #[test]

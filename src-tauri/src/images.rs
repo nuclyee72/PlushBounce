@@ -179,7 +179,7 @@ pub fn import(src: &Path, images_dir: &Path, id: &str) -> Result<(String, f32), 
     let reader = ImageReader::open(src).map_err(|e| e.to_string())?.with_guessed_format().map_err(|e| e.to_string())?;
     let mut rgba = reader.decode().map_err(|e| e.to_string())?.to_rgba8();
     remove_flat_background(&mut rgba);
-    let (x, y, w, h) = opaque_bounds(&rgba).ok_or("완전히 투명한 이미지입니다")?;
+    let (x, y, w, h) = opaque_bounds(&rgba).ok_or("The image is fully transparent.")?;
     let mut cropped = image::imageops::crop_imm(&rgba, x, y, w, h).to_image();
     if h > MAX_HEIGHT {
         let nw = ((w as f32) * MAX_HEIGHT as f32 / h as f32).round().max(1.0) as u32;

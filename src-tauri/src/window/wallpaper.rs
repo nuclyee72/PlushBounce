@@ -34,7 +34,7 @@ unsafe extern "system" fn enum_top(top: HWND, lparam: LPARAM) -> BOOL {
 /// `hwnd`를 아이콘 뒤에 붙이고 화면 좌표 (x, y, w, h)에 맞춘다.
 pub fn attach(hwnd: HWND, rect: (i32, i32, i32, i32)) -> Result<(), String> {
     unsafe {
-        let progman = FindWindowW(w!("Progman"), None).map_err(|_| "바탕화면 창을 찾지 못했습니다".to_string())?;
+        let progman = FindWindowW(w!("Progman"), None).map_err(|_| "Couldn't find the desktop window.".to_string())?;
         SendMessageTimeoutW(progman, SPAWN_WORKERW, WPARAM(0xD), LPARAM(0x1), SMTO_NORMAL, 1000, None);
 
         let ex = GetWindowLongPtrW(progman, GWL_EXSTYLE) as u32;
@@ -44,19 +44,19 @@ pub fn attach(hwnd: HWND, rect: (i32, i32, i32, i32)) -> Result<(), String> {
             let mut p = POINT { x: rect.0, y: rect.1 };
             let _ = ScreenToClient(parent, &mut p);
             SetWindowPos(hwnd, after, p.x, p.y, rect.2, rect.3, SWP_NOACTIVATE | SWP_SHOWWINDOW)
-                .map_err(|e| format!("바탕화면에 창을 놓지 못했습니다 ({e})"))
+                .map_err(|e| format!("Couldn't place the window on the desktop. ({e})"))
         };
 
         if raised {
             let defview = FindWindowExW(Some(progman), None, w!("SHELLDLL_DefView"), None).ok();
             let worker = FindWindowExW(Some(progman), None, w!("WorkerW"), None)
-                .map_err(|_| "바탕화면 레이어(WorkerW)를 찾지 못했습니다".to_string())?;
+                .map_err(|_| "Couldn't find the desktop layer (WorkerW).".to_string())?;
             let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
             SetWindowLongPtrW(hwnd, GWL_STYLE, ((style & !WS_POPUP.0) | WS_CHILD.0) as isize);
             let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, (ex | WS_EX_LAYERED.0) as isize);
             let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA);
-            SetParent(hwnd, Some(progman)).map_err(|e| format!("바탕화면에 붙이지 못했습니다 ({e})"))?;
+            SetParent(hwnd, Some(progman)).map_err(|e| format!("Couldn't attach to the desktop. ({e})"))?;
             // DefView(아이콘) 바로 아래에 둔다.
             place(progman, defview)?;
             // WorkerW(원래 배경화면)는 항상 맨 아래.
@@ -66,8 +66,8 @@ pub fn attach(hwnd: HWND, rect: (i32, i32, i32, i32)) -> Result<(), String> {
 
         let mut found = Found::default();
         let _ = EnumWindows(Some(enum_top), LPARAM(&mut found as *mut Found as isize));
-        let worker = found.worker.ok_or_else(|| "바탕화면 레이어(WorkerW)를 찾지 못했습니다".to_string())?;
-        SetParent(hwnd, Some(worker)).map_err(|e| format!("바탕화면에 붙이지 못했습니다 ({e})"))?;
+        let worker = found.worker.ok_or_else(|| "Couldn't find the desktop layer (WorkerW).".to_string())?;
+        SetParent(hwnd, Some(worker)).map_err(|e| format!("Couldn't attach to the desktop. ({e})"))?;
         place(worker, None)
     }
 }

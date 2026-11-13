@@ -8,9 +8,9 @@
   import { app, fail, init } from "./store.svelte";
 
   const tabs = [
-    ["dolls", "인형"],
-    ["audio", "오디오"],
-    ["display", "화면"],
+    ["dolls", "Dolls"],
+    ["audio", "Audio"],
+    ["display", "Display"],
   ] as const;
 
   const problem = $derived(app.error ?? app.runtime.displayError ?? app.runtime.audioError);
@@ -41,7 +41,7 @@
       <div class="error" role="alert">
         <span>{problem}</span>
         {#if app.error}
-          <button aria-label="닫기" onclick={() => (app.error = null)}><Icon name="x" /></button>
+          <button aria-label="Close" onclick={() => (app.error = null)}><Icon name="x" /></button>
         {/if}
       </div>
     {/if}

@@ -42,6 +42,7 @@
     display: flex;
     justify-content: space-between;
     font-size: 11px;
+    font-weight: 400;
     line-height: 1.2;
     color: var(--dim);
     opacity: 0.8;

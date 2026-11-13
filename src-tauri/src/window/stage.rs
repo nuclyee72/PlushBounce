@@ -85,7 +85,7 @@ pub fn apply_edit(app: &AppHandle, state: &Shared) {
 fn build(app: &AppHandle, state: &Shared, mode: Mode) -> Result<WebviewWindow, String> {
     let mons = monitors(app);
     let index = lock(&state.config).display.monitor;
-    let mon = mons.get(index).or(mons.first()).ok_or("모니터를 찾지 못했습니다")?;
+    let mon = mons.get(index).or(mons.first()).ok_or("Couldn't find the monitor.")?;
     let label = format!("stage-{}", state.stage_seq.fetch_add(1, Ordering::Relaxed));
     let pet = mode == Mode::Pet;
 
@@ -144,7 +144,7 @@ pub fn rebuild(app: &AppHandle, state: &Shared) {
         }
         Err(e) if mode == Mode::Wallpaper => {
             state.update_runtime(app, |r| {
-                r.display_error = Some(format!("바탕화면 모드를 켜지 못해 펫 모드로 돌아갑니다. ({e})"));
+                r.display_error = Some(format!("Couldn't turn on wallpaper mode; switched back to pet mode. ({e})"));
             });
             lock(&state.config).display.mode = Mode::Pet;
             state.broadcast_config(app, "rust");
@@ -159,6 +159,6 @@ pub fn rebuild(app: &AppHandle, state: &Shared) {
                 let _ = old.destroy();
             }
         }
-        Err(e) => state.update_runtime(app, |r| r.display_error = Some(format!("인형 창을 만들지 못했습니다. ({e})"))),
+        Err(e) => state.update_runtime(app, |r| r.display_error = Some(format!("Couldn't create the doll window. ({e})"))),
     }
 }

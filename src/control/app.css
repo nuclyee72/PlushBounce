@@ -172,12 +172,15 @@ input[type="color"] {
   background: none;
 }
 
-label.field {
-  display: grid;
-  grid-template-columns: 48px 1fr;
-  align-items: center;
-  gap: 8px;
-  color: var(--dim);
+/* 이름은 슬라이더 바로 위에: 이름 → 슬라이더 → 양 끝 설명이 한 묶음으로 읽히게 */
+label.field,
+.field-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .row {

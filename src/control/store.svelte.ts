@@ -103,7 +103,7 @@ export async function refreshSessions(): Promise<void> {
 export async function addDolls(paths: string[]): Promise<void> {
   const images = paths.filter((p) => DOLL_EXTENSIONS.includes(p.split(".").pop()?.toLowerCase() ?? ""));
   if (images.length === 0) {
-    if (paths.length) fail("이미지 파일(PNG, JPG, WebP, BMP, GIF 등)을 넣어 주세요.");
+    if (paths.length) fail("Please add image files (PNG, JPG, WebP, BMP, GIF, …).");
     return;
   }
   try {

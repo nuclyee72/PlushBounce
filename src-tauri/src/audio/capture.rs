@@ -124,7 +124,7 @@ pub fn run(state: &Shared, tx: &SyncSender<Msg>, on_running: &dyn Fn()) -> Resul
             apps = running_apps(names);
             if apps.is_empty() {
                 let list = names.iter().map(|n| short(n)).collect::<Vec<_>>().join(", ");
-                return Err(format!("고른 앱({list})이 실행 중이 아닙니다. 앱을 켜거나 다른 소스를 고르세요."));
+                return Err(format!("The selected apps ({list}) are not running. Start one or choose another source."));
             }
             for (_, pid) in &apps {
                 let client = AudioClient::new_application_loopback_client(*pid, true).map_err(es)?;
@@ -136,7 +136,7 @@ pub fn run(state: &Shared, tx: &SyncSender<Msg>, on_running: &dyn Fn()) -> Resul
             // normalize가 Apps로 옮기므로 여기 오지 않지만, 오면 앱 하나로 다룬다.
             apps = running_apps(std::slice::from_ref(name));
             let Some((_, pid)) = apps.first() else {
-                return Err(format!("'{}'이(가) 실행 중이 아닙니다. 앱을 켜거나 다른 소스를 고르세요.", short(name)));
+                return Err(format!("'{}' is not running. Start it or choose another source.", short(name)));
             };
             let client = AudioClient::new_application_loopback_client(*pid, true).map_err(es)?;
             streams.push(Stream::open(client, APP_RATE, 2, 0)?);
@@ -149,7 +149,7 @@ pub fn run(state: &Shared, tx: &SyncSender<Msg>, on_running: &dyn Fn()) -> Resul
         Source::System => Vec::new(),
     };
 
-    tx.send(Msg::Format(rate)).map_err(|_| "분석 스레드가 멈췄습니다.".to_string())?;
+    tx.send(Msg::Format(rate)).map_err(|_| "The analysis thread stopped.".to_string())?;
     on_running();
 
     let max_backlog = (MAX_BACKLOG_S * rate as f32) as usize;
@@ -159,7 +159,7 @@ pub fn run(state: &Shared, tx: &SyncSender<Msg>, on_running: &dyn Fn()) -> Resul
     let send = |mono: Vec<f32>| -> Result<(), String> {
         match tx.try_send(Msg::Samples(mono)) {
             Ok(()) | Err(TrySendError::Full(_)) => Ok(()), // 분석이 밀리면 버린다 (지연을 쌓지 않는다).
-            Err(TrySendError::Disconnected(_)) => Err("분석 스레드가 멈췄습니다.".to_string()),
+            Err(TrySendError::Disconnected(_)) => Err("The analysis thread stopped.".to_string()),
         }
     };
 

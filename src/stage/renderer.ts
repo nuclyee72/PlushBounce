@@ -229,7 +229,6 @@ export class StageRenderer {
 
     const lag = (cfg.motion.latencyMs ?? 0) / 1000;
     const period = this.periodS();
-    const tempoMode = cfg.motion.sync === "tempo" && f.tempo !== null;
     for (const b of BAND_IDS) {
       if (f.bands[b].onset) this.pending[b] = Math.max(this.pending[b], f.bands[b].strength);
     }
@@ -262,11 +261,8 @@ export class StageRenderer {
         continue;
       }
       if (f.tempo && period) {
-        if (tempoMode) {
-          // 박자 고정: 박에만. 전체 인형은 매 박, 나머지는 직전 한 박 안에 자기 소리가 있었을 때.
-          if (beatNow && (band === "full" || this.pending[band] > 0)) s.energize(this.pending[band], period, 0, now, lag);
-        } else if (b.onset && shouldBounce(now, s.acceptedAt, band, b.strength, this.clock)) {
-          // 박자: 박에 맞는 자기 소리가 들리는 동안 움직인다. 움직이는 시점은 박 시계.
+        // 박자: 박에 맞는 자기 소리가 들리는 동안 움직인다. 움직이는 시점은 박 시계.
+        if (b.onset && shouldBounce(now, s.acceptedAt, band, b.strength, this.clock)) {
           s.energize(b.strength, period, sinceBeat, now, lag);
         }
         if (beatNow) s.spring.sync(period);
@@ -277,7 +273,7 @@ export class StageRenderer {
         s.bounce(b.strength, period, now, this.align(band, now), lag);
       }
     }
-    if (!tempoMode || f.tempo!.beat) for (const b of BAND_IDS) this.pending[b] = 0;
+    for (const b of BAND_IDS) this.pending[b] = 0;
   }
 
   /**

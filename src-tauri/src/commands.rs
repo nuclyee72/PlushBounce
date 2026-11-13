@@ -39,14 +39,14 @@ pub fn list_monitors(app: AppHandle) -> Vec<MonitorInfo> {
 #[tauri::command]
 pub async fn list_audio_sessions() -> Result<Vec<AudioSession>, String> {
     // COM을 쓰므로 전용 스레드에서 돈다.
-    std::thread::spawn(sessions::list).join().map_err(|_| "앱 목록을 읽지 못했습니다".to_string())?
+    std::thread::spawn(sessions::list).join().map_err(|_| "Couldn't read the list of apps.".to_string())?
 }
 
 #[tauri::command]
 pub async fn add_dolls(app: AppHandle, state: S<'_>, paths: Vec<String>) -> Result<Config, String> {
     let (cfg, failed) = actions::add_dolls(&app, &state, &paths);
     if failed > 0 {
-        return Err(format!("이미지 {failed}개를 열지 못했습니다. PNG, JPG, WebP, BMP, GIF 파일을 넣어 주세요."));
+        return Err(format!("Couldn't open {failed} image(s). Please add PNG, JPG, WebP, BMP or GIF files."));
     }
     Ok(cfg)
 }
@@ -77,11 +77,11 @@ pub async fn set_background_image(app: AppHandle, state: S<'_>, path: String) ->
     let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
     // 배경은 WebView가 직접 그리므로 브라우저가 여는 형식만 받는다.
     if !["png", "jpg", "jpeg", "jfif", "webp", "gif", "bmp", "avif", "ico"].contains(&ext.as_str()) {
-        return Err("배경으로 쓸 수 없는 파일입니다. PNG, JPG, WebP, BMP 이미지를 골라 주세요.".into());
+        return Err("This file can't be used as a background. Please choose a PNG, JPG, WebP or BMP image.".into());
     }
     let file = format!("bg-{}.{ext}", images::new_id());
     std::fs::create_dir_all(&state.images_dir).map_err(|e| e.to_string())?;
-    std::fs::copy(&src, state.images_dir.join(&file)).map_err(|e| format!("배경 이미지를 복사하지 못했습니다. ({e})"))?;
+    std::fs::copy(&src, state.images_dir.join(&file)).map_err(|e| format!("Couldn't copy the background image. ({e})"))?;
     let mut cfg = state.config();
     if let Background::Image { path: old } = &cfg.display.background {
         if old.starts_with("bg-") {
@@ -100,14 +100,14 @@ pub async fn set_edit_mode(app: AppHandle, state: S<'_>, on: bool) -> Result<(),
 
 #[tauri::command]
 pub async fn export_preset(state: S<'_>, path: String) -> Result<(), String> {
-    state.config().save(Path::new(&path)).map_err(|e| format!("프리셋을 저장하지 못했습니다. ({e})"))
+    state.config().save(Path::new(&path)).map_err(|e| format!("Couldn't save the preset. ({e})"))
 }
 
 /// 프리셋(전체 설정 JSON)을 불러온다. 이 PC에 이미지가 없는 인형은 뺀다.
 #[tauri::command]
 pub async fn import_preset(app: AppHandle, state: S<'_>, path: String) -> Result<Config, String> {
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("프리셋 파일을 읽지 못했습니다. ({e})"))?;
-    let mut cfg: Config = serde_json::from_str(&text).map_err(|_| "프리셋 파일 형식이 맞지 않습니다.".to_string())?;
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("Couldn't read the preset file. ({e})"))?;
+    let mut cfg: Config = serde_json::from_str(&text).map_err(|_| "The preset file format is not valid.".to_string())?;
     let dir = state.images_dir.clone();
     let exists = |file: &str| !file.contains(['/', '\\']) && dir.join(file).is_file();
     cfg.dolls.retain(|d| exists(&d.image));

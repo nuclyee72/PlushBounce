@@ -1,14 +1,13 @@
 <script lang="ts">
   import { open } from "@tauri-apps/plugin-dialog";
   import { api, imageUrl } from "../shared/api";
-  import { BAND_COLORS, BAND_LABELS, DOLL_BAND_COLORS, DOLL_BAND_LABELS, DOLL_BANDS, DOLL_EXTENSIONS, LATENCY_MAX_MS, LATENCY_MIN_MS } from "../shared/types";
-  import type { BandId, Doll, Line } from "../shared/types";
+  import { BAND_LABELS, DOLL_BAND_COLORS, DOLL_BAND_LABELS, DOLL_BANDS, DOLL_EXTENSIONS } from "../shared/types";
+  import type { Doll, Line } from "../shared/types";
   import Icon from "./Icon.svelte";
   import Slider from "./Slider.svelte";
   import { addDolls, app, commit, fail, getRenderer, live } from "./store.svelte";
 
   const cfg = $derived(app.cfg!);
-  const latency = $derived(Math.round(cfg.motion.latencyMs ?? 0));
   const dolls = $derived([...cfg.dolls].sort((a, b) => a.order - b.order));
   const selected = $derived(cfg.dolls.find((d) => d.id === app.selected) ?? null);
   // 원근·가까운 쪽·겹침은 선마다 따로다. 지금 다루는 선(없으면 첫 번째 선)의 값을 보여 주고 바꾼다.
@@ -22,7 +21,7 @@
   async function pick() {
     const picked = await open({
       multiple: true,
-      filters: [{ name: "이미지", extensions: DOLL_EXTENSIONS }],
+      filters: [{ name: "Images", extensions: DOLL_EXTENSIONS }],
     });
     if (picked) await addDolls(Array.isArray(picked) ? picked : [picked]);
   }
@@ -108,32 +107,6 @@
     app.line = null;
   }
 
-  // ── 타이밍 (모든 인형 공통): − / + 를 누르면 10ms씩, 누르고 있으면 계속 바뀐다. ──
-  const clampLatency = (v: number) => Math.min(LATENCY_MAX_MS, Math.max(LATENCY_MIN_MS, Math.round(v)));
-  const setLatency = (v: number) => {
-    if (Number.isFinite(v)) motion((c) => (c.motion.latencyMs = clampLatency(v)));
-  };
-  let repeatTimer: ReturnType<typeof setTimeout> | null = null;
-  let repeated = false;
-  function holdStart(step: number) {
-    repeated = false;
-    stopHold();
-    repeatTimer = setTimeout(function again() {
-      repeated = true;
-      setLatency((app.cfg?.motion.latencyMs ?? 0) + step);
-      repeatTimer = setTimeout(again, 70);
-    }, 400);
-  }
-  function stopHold() {
-    if (repeatTimer) clearTimeout(repeatTimer);
-    repeatTimer = null;
-  }
-  function nudge(step: number) {
-    // 누르고 있다가 뗀 경우는 이미 바뀌었으므로 한 번 더 더하지 않는다.
-    if (repeated) repeated = false;
-    else setLatency(latency + step);
-  }
-
   // ── 드래그로 순서 변경 (파일 드롭을 켜 두면 HTML5 드래그를 쓸 수 없어 포인터로 처리) ──
   let dragId = $state<string | null>(null);
   let moved = false;
@@ -169,103 +142,49 @@
   }
 </script>
 
-  <div class="row">
-    <div class="seg" role="group" aria-label="배정 방식">
-      <button class:on={cfg.motion.assign === "spread"} title="따로" aria-label="따로" onclick={() => commit((c) => (c.motion.assign = "spread"))}>
-        <span class="dots">{#each ["kick", "mid", "bass", "high"] as b}<i style="background:{BAND_COLORS[b as BandId]}"></i>{/each}</span>
-      </button>
-      <button class:on={cfg.motion.assign === "together"} title="함께" aria-label="함께" onclick={() => commit((c) => (c.motion.assign = "together"))}>
-        <span class="dots">{#each [0, 1, 2, 3] as _}<i style="background:{BAND_COLORS.full}"></i>{/each}</span>
-      </button>
-    </div>
-    <div class="seg" role="group" aria-label="트리거 방식">
-      <button class:on={cfg.motion.sync === "onset"} title="소리마다" aria-label="소리마다" onclick={() => commit((c) => (c.motion.sync = "onset"))}>
-        <Icon name="onset" />
-      </button>
-      <button class:on={cfg.motion.sync === "tempo"} title="박자 고정" aria-label="박자 고정" onclick={() => commit((c) => (c.motion.sync = "tempo"))}>
-        <Icon name="tempo" />
-        {#if live.bpm}<span class="bpm" style="opacity:{0.6 + 0.4 * live.beat}">{live.bpm}</span>{/if}
-      </button>
-    </div>
-    <!-- 타이밍: 모든 인형에 공통. 인형이 소리보다 늦어 보이면 −, 빨라 보이면 +. 숫자를 두 번 누르면 0. -->
-    <div class="timing" class:set={latency !== 0} role="group" aria-label="타이밍" title="타이밍">
-      <Icon name="clock" />
-      <button
-        class="round"
-        aria-label="일찍"
-        disabled={latency <= LATENCY_MIN_MS}
-        onpointerdown={() => holdStart(-10)}
-        onpointerup={stopHold}
-        onpointerleave={stopHold}
-        onclick={() => nudge(-10)}><Icon name="minus" /></button
-      >
-      <label class="val">
-        <input
-          type="number"
-          step="10"
-          min={LATENCY_MIN_MS}
-          max={LATENCY_MAX_MS}
-          aria-label="타이밍 ms"
-          value={latency}
-          onchange={(e) => setLatency(e.currentTarget.valueAsNumber)}
-          ondblclick={() => setLatency(0)}
-        /><small>ms</small>
-      </label>
-      <button
-        class="round"
-        aria-label="늦게"
-        disabled={latency >= LATENCY_MAX_MS}
-        onpointerdown={() => holdStart(10)}
-        onpointerup={stopHold}
-        onpointerleave={stopHold}
-        onclick={() => nudge(10)}><Icon name="plus" /></button
-      >
-    </div>
-  </div>
-
-  <!-- 타이밍 줄 아래는 모두 한 덩어리로 스크롤된다 (인형 목록은 따로 스크롤하지 않고 줄을 바꿔 늘어선다). -->
+  <!-- 탭 전체가 한 덩어리로 스크롤된다 (인형 목록은 따로 스크롤하지 않고 줄을 바꿔 늘어선다). -->
   <div class="scroll">
   <div class="sliders">
     <!-- 끄는 동안 미리보기 인형이 계속 꿍실거려서 결과가 바로 보인다. -->
-    <label class="field">깊이<Slider lo="살짝" hi="푹" min={0} max={0.4} step={0.005} value={cfg.motion.amount} oninput={(v) => motion((c) => (c.motion.amount = v))} /></label>
+    <label class="field">Squash<Slider lo="Light" hi="Deep" min={0} max={0.4} step={0.005} value={cfg.motion.amount} oninput={(v) => motion((c) => (c.motion.amount = v))} /></label>
   </div>
 
   <!-- 선: 고르기·추가·삭제. 아래 속성은 고른 선의 것이다(선마다 따로 저장된다). -->
   <fieldset class="line">
-    <legend>선</legend>
-    <div class="lines" role="group" aria-label="선 고르기">
+    <legend>Line</legend>
+    <div class="lines" role="group" aria-label="Choose line">
       {#each cfg.lines as l, i (l.id)}
         <button class="lchip" class:on={l.id === line.id} onclick={() => (app.line = l.id)}>
           <i class="stroke"></i>{i + 1}
         </button>
       {/each}
-      <button class="icon" aria-label="선 추가" title="선 추가" onclick={addLine}><Icon name="plus" /></button>
+      <button class="icon" aria-label="Add line" title="Add line" onclick={addLine}><Icon name="plus" /></button>
       <button
         class="icon del"
-        aria-label="이 선 삭제"
-        title="이 선 삭제"
+        aria-label="Delete this line"
+        title="Delete this line"
         disabled={cfg.lines.length <= 1}
         onclick={() => removeLine(line.id)}><Icon name="trash" /></button
       >
     </div>
-    <div class="seg" role="group" aria-label="가까운 쪽">
-      <button class:on={line.near === "left"} title="왼쪽이 가깝게" aria-label="왼쪽이 가깝게" onclick={() => editLine((l) => (l.near = "left"))}>
+    <div class="seg" role="group" aria-label="Near side">
+      <button class:on={line.near === "left"} title="Left is nearer" aria-label="Left is nearer" onclick={() => editLine((l) => (l.near = "left"))}>
         <span class="near"><i class="big"></i><i></i></span>
       </button>
-      <button class:on={line.near === "right"} title="오른쪽이 가깝게" aria-label="오른쪽이 가깝게" onclick={() => editLine((l) => (l.near = "right"))}>
+      <button class:on={line.near === "right"} title="Right is nearer" aria-label="Right is nearer" onclick={() => editLine((l) => (l.near = "right"))}>
         <span class="near"><i></i><i class="big"></i></span>
       </button>
     </div>
-    <label class="field">원근<Slider lo="모두 같게" hi="멀수록 작게" min={0} max={0.9} step={0.01} value={1 - line.farScale} oninput={(v) => editLine((l) => (l.farScale = 1 - v))} /></label>
+    <label class="field">Perspective<Slider lo="All same" hi="Smaller far" min={0} max={0.9} step={0.01} value={1 - line.farScale} oninput={(v) => editLine((l) => (l.farScale = 1 - v))} /></label>
     <!-- 간격: 자동이면 선 전체에 고르게 펼친다. 손으로 끌면 자동이 꺼진다. -->
-    <div class="field gap">
-      간격
+    <div class="field-col">
+      Spacing
       <div class="gaprow">
-        <button class="icon" class:on={!!line.autoGap} aria-pressed={!!line.autoGap} aria-label="간격 자동" title="간격 자동" onclick={toggleAutoGap}
+        <button class="icon" class:on={!!line.autoGap} aria-pressed={!!line.autoGap} aria-label="Auto spacing" title="Auto spacing" onclick={toggleAutoGap}
           ><Icon name="spread" /></button
         >
         <span class="gapslider" class:muted={!!line.autoGap}>
-          <Slider lo="나란히" hi="겹치게" min={0} max={0.6} step={0.01} value={line.overlap} oninput={setGap} />
+          <Slider lo="Side by side" hi="Overlap" min={0} max={0.6} step={0.01} value={line.overlap} oninput={setGap} />
         </span>
       </div>
     </div>
@@ -282,7 +201,7 @@
         data-doll={d.id}
         role="button"
         tabindex="0"
-        aria-label="인형"
+        aria-label="Doll"
         style="--band:{DOLL_BAND_COLORS[d.band]};--flash:{flashOf(d)}"
         onpointerdown={(e) => down(e, d.id)}
         onpointermove={move}
@@ -291,25 +210,25 @@
         onkeydown={(e) => e.key === "Enter" && (app.selected = app.selected === d.id ? null : d.id)}
       >
         <img src={imageUrl(app.imagesDir, d.image)} alt="" draggable="false" style={d.flip ? "transform:scaleX(-1)" : ""} />
-        <button class="mini eye" aria-label={d.visible ? "숨기기" : "보이기"} onclick={() => edit(d.id, (x) => (x.visible = !x.visible))}>
+        <button class="mini eye" aria-label={d.visible ? "Hide" : "Show"} onclick={() => edit(d.id, (x) => (x.visible = !x.visible))}>
           <Icon name={d.visible ? "eye" : "eyeOff"} />
         </button>
-        <button class="mini del" aria-label="삭제" onclick={() => remove(d.id)}><Icon name="x" /></button>
+        <button class="mini del" aria-label="Delete" onclick={() => remove(d.id)}><Icon name="x" /></button>
       </div>
     {/each}
     {#if dolls.length === 0}
-      <button class="drop" class:hot={app.dropping} onclick={pick} aria-label="이미지 추가">
+      <button class="drop" class:hot={app.dropping} onclick={pick} aria-label="Add images">
         <Icon name="image" />
-        <span>이미지 놓기</span>
+        <span>Drop images here</span>
       </button>
     {:else}
-      <button class="thumb add" aria-label="이미지 추가" onclick={pick}><Icon name="plus" /></button>
+      <button class="thumb add" aria-label="Add images" onclick={pick}><Icon name="plus" /></button>
     {/if}
   </div>
 
   {#if selected}
     {@const s = selected}
-    <section class="adv-box" aria-label="이 인형 설정">
+    <section class="adv-box" aria-label="This doll's settings">
       <div class="adv">
         <!-- 이 인형의 두 가지 설정: 어떤 소리(대역)에 / 어떻게(박자·모든 소리) 반응하는가 -->
         <div class="row">
@@ -325,20 +244,20 @@
             </button>
           {/each}
           <!-- 박 인형은 늘 박자로 움직인다 (모든 소리를 고를 수 없다). -->
-          <div class="seg react" role="group" aria-label="반응 방식">
-            <button class:on={s.react !== "every" || s.band === "beat"} onclick={() => edit(s.id, (d) => (d.react = "beat"))}><Icon name="tempo" />박자</button>
+          <div class="seg react" role="group" aria-label="Response">
+            <button class:on={s.react !== "every" || s.band === "beat"} onclick={() => edit(s.id, (d) => (d.react = "beat"))}><Icon name="tempo" />Beat</button>
             <button
               class="every"
               class:on={s.react === "every" && s.band !== "beat"}
               disabled={s.band === "beat"}
-              onclick={() => edit(s.id, (d) => (d.react = "every"))}><Icon name="onset" />모든 소리</button
+              onclick={() => edit(s.id, (d) => (d.react = "every"))}><Icon name="onset" />Every sound</button
             >
           </div>
           <span class="tools">
-          <button class:on={s.flip} aria-label="좌우 반전" title="좌우 반전" onclick={() => edit(s.id, (d) => (d.flip = !d.flip))}><Icon name="flip" /></button>
+          <button class:on={s.flip} aria-label="Flip" title="Flip" onclick={() => edit(s.id, (d) => (d.flip = !d.flip))}><Icon name="flip" /></button>
           <button
-            aria-label="자동으로 되돌리기"
-            title="자동으로 되돌리기"
+            aria-label="Reset to auto"
+            title="Reset to auto"
             disabled={!s.manual.layout && !s.manual.band && s.size === 1 && s.at == null}
             onclick={() => edit(s.id, (d) => ((d.manual = { layout: false, band: false }), (d.size = 1), (d.at = null)))}
           >
@@ -387,9 +306,6 @@
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 10px 18px;
-    align-items: start;
-  }
-  .sliders :global(label.field) {
     align-items: start;
   }
   .line {
@@ -447,21 +363,11 @@
     padding: 0 6px;
     color: var(--dim);
   }
-  .line :global(label.field) {
-    align-items: start;
-  }
-  .dots,
   .near {
     display: inline-flex;
     gap: 3px;
     align-items: flex-end;
     height: 18px;
-  }
-  .dots i {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    align-self: center;
   }
   .near i {
     width: 8px;
@@ -472,10 +378,6 @@
   .near i.big {
     width: 15px;
     height: 16px;
-  }
-  .bpm {
-    font-variant-numeric: tabular-nums;
-    font-size: 12px;
   }
   .strip {
     display: flex;
@@ -560,95 +462,6 @@
   .adv {
     display: grid;
     gap: 12px;
-  }
-  .timing {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    height: 34px;
-    padding: 0 4px 0 10px;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    background: var(--panel);
-    color: var(--dim);
-    transition: border-color 0.15s;
-  }
-  .timing.set {
-    border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
-    color: var(--accent);
-  }
-  .timing > :global(svg.icon) {
-    width: 16px;
-    height: 16px;
-    margin-right: 2px;
-  }
-  .timing .round {
-    width: 26px;
-    height: 26px;
-    padding: 0;
-    justify-content: center;
-    border-radius: 50%;
-    border: 0;
-    background: var(--raised);
-    color: var(--text);
-    transition: background 0.12s, transform 0.08s;
-  }
-  .timing .round :global(svg.icon) {
-    width: 14px;
-    height: 14px;
-    stroke-width: 2.4;
-  }
-  .timing .round:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--accent) 30%, var(--raised));
-  }
-  .timing .round:active:not(:disabled) {
-    transform: scale(0.9);
-  }
-  .timing .val {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 1px;
-    min-width: 56px;
-    justify-content: center;
-    font-variant-numeric: tabular-nums;
-    cursor: text;
-  }
-  .timing .val input {
-    width: auto;
-    min-width: 1ch;
-    field-sizing: content;
-    padding: 0;
-    border: 0;
-    background: none;
-    text-align: center;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text);
-    -moz-appearance: textfield;
-  }
-  .timing.set .val input {
-    color: var(--accent);
-  }
-  .timing .val input::-webkit-inner-spin-button {
-    -webkit-appearance: none;
-  }
-  .timing .val input:focus-visible {
-    outline: none;
-  }
-  .timing:focus-within {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
-  }
-  .timing .val small {
-    font-size: 10px;
-    color: var(--dim);
-  }
-  .gap {
-    display: grid;
-    grid-template-columns: 48px 1fr;
-    gap: 8px;
-    align-items: start;
-    color: var(--dim);
   }
   .gaprow {
     display: flex;
