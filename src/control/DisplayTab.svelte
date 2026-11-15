@@ -4,6 +4,7 @@
   import { onMount } from "svelte";
   import { api } from "../shared/api";
   import Icon from "./Icon.svelte";
+  import Slider from "./Slider.svelte";
   import { app, commit, fail } from "./store.svelte";
 
   const cfg = $derived(app.cfg!);
@@ -59,6 +60,25 @@
   {/if}
 </div>
 
+<!-- 마우스가 가까이 오면 인형이 흐려진다 (인형 뒤의 것을 누르기 쉽게). 슬라이더는 가장 흐려졌을 때. -->
+<div class="row">
+  <button class:on={cfg.display.hoverFade !== false} aria-pressed={cfg.display.hoverFade !== false} onclick={() => commit((c) => (c.display.hoverFade = c.display.hoverFade === false))}
+    ><Icon name="eye" />Fade near mouse</button
+  >
+  <label class="field" class:muted={cfg.display.hoverFade === false}
+    >Most transparent<Slider
+      lo="Barely"
+      hi="Invisible"
+      min={0.1}
+      max={1}
+      step={0.01}
+      value={cfg.display.hoverFadeMax ?? 0.7}
+      oninput={(v) => commit((c) => ((c.display.hoverFadeMax = v), (c.display.hoverFade = true)))}
+    /></label
+  >
+  <span class="pct">{Math.round((cfg.display.hoverFadeMax ?? 0.7) * 100)}%</span>
+</div>
+
 {#if wallpaper}
   <div class="row">
     <div class="seg" role="group" aria-label="Background">
@@ -101,5 +121,23 @@
   }
   .spacer {
     flex: 1;
+  }
+  .field {
+    flex: 1;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: start;
+    gap: 10px;
+    max-width: 360px;
+    transition: opacity 0.15s;
+  }
+  .field.muted {
+    opacity: 0.45;
+  }
+  .pct {
+    min-width: 40px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--dim);
   }
 </style>

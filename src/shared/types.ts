@@ -86,12 +86,18 @@ export type Config = {
     /** 간격 자동: 박에 맞춰 최소 온셋 간격을 정한다 (minOnsetIntervalMs 대신). */
     autoInterval?: boolean;
     gateDb: number; // 역치: 이보다 작은 입력(dBFS)에는 반응하지 않는다
+    /** 역치 자동: 최근 소리 크기를 보고 역치를 스스로 정한다 (gateDb 대신). */
+    autoGate?: boolean;
   };
   display: {
     mode: "pet" | "wallpaper";
     monitor: number;
     globalScale: number;
     background: Background;
+    /** 마우스가 가까이 오면 인형을 흐리게 한다. */
+    hoverFade: boolean;
+    /** 가장 흐려졌을 때의 투명도 (0..1). */
+    hoverFadeMax: number;
   };
   motion: {
     sync: "onset" | "tempo";
@@ -101,6 +107,10 @@ export type Config = {
     damping: number;
     /** 화면 지연 보정(ms). 양수면 인형이 늦게, 음수면 일찍 움직인다. */
     latencyMs: number;
+    /** 자동 움직임(소리가 없을 때 숨쉬기)의 크기. 0이면 끈다. */
+    idleAmount: number;
+    /** 자동 움직임의 빠르기 배율 (1 = 기본). */
+    idleSpeed: number;
   };
   lines: Line[];
   dolls: Doll[];
@@ -113,6 +123,7 @@ export type AudioFrame = {
   silent: boolean;
   level: number; // 입력 크기 (dBFS)
   gapMs?: number; // 지금 쓰는 최소 온셋 간격 (간격 자동이면 박에 따라 바뀐다)
+  gateDb?: number; // 지금 쓰는 역치 (역치 자동이면 소리에 따라 바뀐다)
 };
 
 export type Runtime = {
@@ -132,5 +143,8 @@ export type MonitorInfo = {
 };
 
 export type AudioSession = { pid: number; name: string; display: string };
+
+/** 마우스 위치 (stage 창 기준 비율). null = 알 수 없음/꺼짐. */
+export type CursorPos = { x: number; y: number } | null;
 
 export type ConfigChanged = { config: Config; origin: string };

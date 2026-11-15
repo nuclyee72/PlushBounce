@@ -21,7 +21,7 @@ export const app = $state({
 });
 
 /** 실시간 미터 값. flash는 온셋 직후 1에서 0으로 줄어든다. */
-export const live = $state({ level: zero(), flash: zero(), bpm: null as number | null, beat: 0, input: -100, gapMs: null as number | null });
+export const live = $state({ level: zero(), flash: zero(), bpm: null as number | null, beat: 0, input: -100, gapMs: null as number | null, gateDb: null as number | null });
 
 /** 최근 분석 기록 (타임라인용). 매 프레임 바뀌므로 반응형이 아닌 일반 객체로 둔다. 시각은 performance.now() ms. */
 export const HISTORY_MS = 8000;
@@ -160,6 +160,8 @@ export async function init(): Promise<void> {
     if (live.bpm !== bpm) live.bpm = bpm;
     const gap = latest?.gapMs != null ? Math.round(latest.gapMs) : null;
     if (live.gapMs !== gap) live.gapMs = gap;
+    const gate = latest?.gateDb != null ? Math.round(latest.gateDb) : null;
+    if (live.gateDb !== gate) live.gateDb = gate;
     // 입력 크기는 빨리 오르고 천천히 내려가게 보여 준다 (dB).
     const input = Math.max(latest ? latest.level : -100, live.input - 1.2);
     if (Math.abs(live.input - input) > 0.3) live.input = input;

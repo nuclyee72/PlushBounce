@@ -45,6 +45,9 @@ struct AudioFrame {
     /// 지금 쓰는 최소 온셋 간격(ms). 간격 자동이면 박에 따라 바뀐다.
     #[serde(rename = "gapMs")]
     gap_ms: f32,
+    /// 지금 쓰는 역치 (dBFS). 역치 자동이면 소리에 따라 바뀐다.
+    #[serde(rename = "gateDb")]
+    gate_db: f32,
 }
 
 /// 이벤트 한 번에 묶여 나가는 분석 프레임들. 온셋과 박은 OR로 합친다.
@@ -58,6 +61,7 @@ struct Merged {
     urgent: bool,
     rms: f32,
     gap_ms: f32,
+    gate_db: f32,
 }
 
 impl Merged {
@@ -78,6 +82,7 @@ impl Merged {
         self.silent = f.silent;
         self.rms = self.rms.max(f.rms);
         self.gap_ms = f.gap_ms;
+        self.gate_db = f.gate_db;
     }
 
     fn take(&mut self, t: f64) -> AudioFrame {
@@ -89,6 +94,7 @@ impl Merged {
             silent: self.silent,
             level: (20.0 * self.rms.max(1e-5).log10()).clamp(-100.0, 0.0),
             gap_ms: self.gap_ms,
+            gate_db: self.gate_db.clamp(-100.0, 0.0),
         };
         *self = Merged::default();
         frame

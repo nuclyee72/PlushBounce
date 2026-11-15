@@ -67,6 +67,9 @@ pub struct AudioCfg {
     /// 역치: 입력이 이 크기(dBFS)보다 작으면 무음으로 보고 반응하지 않는다.
     #[serde(default = "default_gate_db")]
     pub gate_db: f32,
+    /// 역치 자동: 최근 소리 크기를 보고 역치를 스스로 정한다 (위 값 대신).
+    #[serde(default)]
+    pub auto_gate: bool,
 }
 
 pub const DEFAULT_GATE_DB: f32 = -74.0;
@@ -97,6 +100,18 @@ pub struct DisplayCfg {
     pub monitor: usize,
     pub global_scale: f32,
     pub background: Background,
+    /// 마우스가 가까이 오면 인형을 흐리게 한다.
+    #[serde(default = "yes")]
+    pub hover_fade: bool,
+    /// 가장 흐려졌을 때의 투명도 (0 = 그대로, 1 = 안 보임).
+    #[serde(default = "default_hover_fade_max")]
+    pub hover_fade_max: f32,
+}
+
+pub const DEFAULT_HOVER_FADE_MAX: f32 = 0.7;
+
+fn default_hover_fade_max() -> f32 {
+    DEFAULT_HOVER_FADE_MAX
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -123,6 +138,18 @@ pub struct MotionCfg {
     /// 화면 지연 보정(ms). 양수면 인형이 그만큼 늦게, 음수면 일찍 움직인다.
     #[serde(rename = "latencyMs", default)]
     pub latency_ms: f32,
+    /// 자동 움직임(소리가 없을 때 숨쉬기)의 크기. 0이면 끈다.
+    #[serde(rename = "idleAmount", default = "default_idle_amount")]
+    pub idle_amount: f32,
+    /// 자동 움직임의 빠르기 배율 (1 = 기본).
+    #[serde(rename = "idleSpeed", default = "one")]
+    pub idle_speed: f32,
+}
+
+pub const DEFAULT_IDLE_AMOUNT: f32 = 0.22;
+
+fn default_idle_amount() -> f32 {
+    DEFAULT_IDLE_AMOUNT
 }
 
 pub const LATENCY_MIN_MS: f32 = -200.0;
@@ -254,9 +281,26 @@ impl Config {
                 min_onset_interval_ms: 120.0,
                 auto_interval: true,
                 gate_db: DEFAULT_GATE_DB,
+                auto_gate: false,
             },
-            display: DisplayCfg { mode: Mode::Pet, monitor: 0, global_scale: 1.0, background: Background::None },
-            motion: MotionCfg { sync: Sync::Onset, assign: Assign::Spread, amount: 0.12, stiffness: 300.0, damping: 16.0, latency_ms: 0.0 },
+            display: DisplayCfg {
+                mode: Mode::Pet,
+                monitor: 0,
+                global_scale: 1.0,
+                background: Background::None,
+                hover_fade: true,
+                hover_fade_max: DEFAULT_HOVER_FADE_MAX,
+            },
+            motion: MotionCfg {
+                sync: Sync::Onset,
+                assign: Assign::Spread,
+                amount: 0.12,
+                stiffness: 300.0,
+                damping: 16.0,
+                latency_ms: 0.0,
+                idle_amount: DEFAULT_IDLE_AMOUNT,
+                idle_speed: 1.0,
+            },
             lines: vec![Line {
                 id: FIRST_LINE.into(),
                 ridge: default_ridge(Mode::Pet, work_bottom),
@@ -278,6 +322,7 @@ impl Config {
             min_onset_interval_ms: self.audio.min_onset_interval_ms,
             auto_interval: self.audio.auto_interval,
             silence_rms: 10f32.powf(self.audio.gate_db / 20.0),
+            auto_gate: self.audio.auto_gate,
         }
     }
 
@@ -306,6 +351,9 @@ impl Config {
         fix(&mut self.motion.damping, 2.0, 80.0, 16.0);
         fix(&mut self.audio.gate_db, -80.0, -6.0, DEFAULT_GATE_DB);
         fix(&mut self.motion.latency_ms, LATENCY_MIN_MS, LATENCY_MAX_MS, 0.0);
+        fix(&mut self.motion.idle_amount, 0.0, 0.6, DEFAULT_IDLE_AMOUNT);
+        fix(&mut self.motion.idle_speed, 0.25, 4.0, 1.0);
+        fix(&mut self.display.hover_fade_max, 0.0, 1.0, DEFAULT_HOVER_FADE_MAX);
 
         // 소스: 예전 형식(앱 하나)은 앱 목록으로 옮기고, 이름이 겹치거나 비면 정리한다.
         if let Source::Process { name, .. } = &self.audio.source {
@@ -458,6 +506,11 @@ mod tests {
             serde_json::json!({"ridge":[{"x":0.1,"y":0.5},{"x":0.5,"y":0.4},{"x":0.9,"y":0.6}],"near":"right","farScale":0.7,"overlap":0.3}),
         );
         o["audio"].as_object_mut().unwrap().remove("gateDb");
+        o["audio"].as_object_mut().unwrap().remove("autoGate");
+        o["display"].as_object_mut().unwrap().remove("hoverFade");
+        o["display"].as_object_mut().unwrap().remove("hoverFadeMax");
+        o["motion"].as_object_mut().unwrap().remove("idleAmount");
+        o["motion"].as_object_mut().unwrap().remove("idleSpeed");
         for d in o["dolls"].as_array_mut().unwrap() {
             d.as_object_mut().unwrap().remove("line");
             d.as_object_mut().unwrap().remove("size");
@@ -470,6 +523,9 @@ mod tests {
         assert!(old.layout.is_none());
         assert!(old.dolls.iter().all(|d| d.line == old.lines[0].id && d.size == 1.0));
         assert_eq!(old.audio.gate_db, DEFAULT_GATE_DB);
+        assert!(!old.audio.auto_gate);
+        assert!(old.display.hover_fade && old.display.hover_fade_max == DEFAULT_HOVER_FADE_MAX);
+        assert!(old.motion.idle_amount == DEFAULT_IDLE_AMOUNT && old.motion.idle_speed == 1.0);
         let saved = serde_json::to_value(&old).unwrap();
         assert!(saved.get("layout").is_none() && saved.get("lines").is_some());
     }

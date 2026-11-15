@@ -34,9 +34,20 @@
   const GATE_MAX = -6;
   const pct = (db: number) => Math.min(100, Math.max(0, ((db - GATE_MIN) / (GATE_MAX - GATE_MIN)) * 100));
   let gateEl = $state<HTMLInputElement | null>(null);
+  /** 역치 자동: 분석이 정한 역치를 보여 준다. 손으로 끌면 자동이 꺼진다. */
+  const autoGate = $derived(!!cfg.audio.autoGate);
+  const gate = $derived(autoGate ? (live.gateDb ?? cfg.audio.gateDb) : cfg.audio.gateDb);
+  function toggleAutoGate() {
+    // 끌 때는 지금 자동으로 정해진 자리에 그대로 둔다 (갑자기 튀지 않게).
+    const keep = live.gateDb;
+    commit((c) => {
+      c.audio.autoGate = !autoGate;
+      if (autoGate && keep != null) c.audio.gateDb = Math.min(GATE_MAX, Math.max(GATE_MIN, keep));
+    });
+  }
   $effect(() => {
     // min/max가 적용된 뒤에 값을 넣는다 (Slider.svelte와 같은 이유).
-    const v = cfg.audio.gateDb;
+    const v = gate;
     if (gateEl && +gateEl.value !== v) gateEl.value = String(v);
   });
 
@@ -66,10 +77,12 @@
 <!-- 역치: 막대가 입력 크기, 손잡이가 기준선. 기준선보다 작은 소리에는 인형이 반응하지 않는다.
      같은 줄 오른쪽: 타이밍(모든 인형 공통 지연 보정). -->
 <div class="gate">
-  <span class="name">Gate</span>
-  <div class="track">
-    <div class="input" class:under={live.input < cfg.audio.gateDb} style="width:{pct(live.input)}%"></div>
-    <div class="cut" style="width:{pct(cfg.audio.gateDb)}%"></div>
+  <span class="name gatename"
+    >Gate<button class="auto" class:on={autoGate} aria-pressed={autoGate} title="Auto gate: follow how loud the music is" onclick={toggleAutoGate}>Auto</button></span
+  >
+  <div class="track" class:auto={autoGate}>
+    <div class="input" class:under={live.input < gate} style="width:{pct(live.input)}%"></div>
+    <div class="cut" style="width:{pct(gate)}%"></div>
     <input
       type="range"
       min={GATE_MIN}
@@ -77,7 +90,7 @@
       step="1"
       aria-label="Gate"
       bind:this={gateEl}
-      oninput={(e) => commit((c) => (c.audio.gateDb = +e.currentTarget.value))}
+      oninput={(e) => commit((c) => ((c.audio.gateDb = +e.currentTarget.value), (c.audio.autoGate = false)))}
     />
   </div>
   <span class="timing-slot"><Timing /></span>
@@ -179,9 +192,21 @@
     align-self: start;
     margin-left: 6px;
   }
+  .gatename {
+    gap: 6px;
+  }
+  .gatename .auto {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+  }
+  .track.auto .cut {
+    transition: width 0.25s;
+    border-right-style: dashed;
+  }
   .gate {
     display: grid;
-    grid-template-columns: 70px 1fr auto;
+    grid-template-columns: 96px 1fr auto;
     align-items: center;
     gap: 2px 8px;
   }

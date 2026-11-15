@@ -43,6 +43,12 @@
     getRenderer()?.demo();
   }
 
+  /** 자동 움직임 설정을 바꾸면서 미리보기에서 숨쉬기를 바로 보여 준다. */
+  function idle(mutate: Parameters<typeof commit>[0]) {
+    commit(mutate);
+    getRenderer()?.showIdle();
+  }
+
   /** 인형 테두리가 깜빡이는 정도: 박 인형은 박마다. */
   const flashOf = (d: Doll) => (!d.visible ? 0 : d.band === "beat" ? live.beat : live.flash[d.band]);
   /** 대역의 범위 안내 (박은 대역이 아니다). */
@@ -147,6 +153,9 @@
   <div class="sliders">
     <!-- 끄는 동안 미리보기 인형이 계속 꿍실거려서 결과가 바로 보인다. -->
     <label class="field">Squash<Slider lo="Light" hi="Deep" min={0} max={0.4} step={0.005} value={cfg.motion.amount} oninput={(v) => motion((c) => (c.motion.amount = v))} /></label>
+    <!-- 자동 움직임: 소리가 없을 때 저절로 숨쉬듯 움직인다. 0이면 끈다. 바꾸는 동안 미리보기에 바로 보여 준다. -->
+    <label class="field">Idle sway<Slider lo="Off" hi="Big" min={0} max={0.6} step={0.01} value={cfg.motion.idleAmount ?? 0.22} oninput={(v) => idle((c) => (c.motion.idleAmount = v))} /></label>
+    <label class="field">Idle speed<Slider lo="Slow" hi="Fast" min={0.25} max={3} step={0.05} value={cfg.motion.idleSpeed ?? 1} oninput={(v) => idle((c) => (c.motion.idleSpeed = v))} /></label>
   </div>
 
   <!-- 선: 고르기·추가·삭제. 아래 속성은 고른 선의 것이다(선마다 따로 저장된다). -->

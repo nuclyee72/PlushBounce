@@ -87,6 +87,7 @@ fn main() {
             window::tray::build(&handle, &state)?;
             window::stage::rebuild(&handle, &state);
             audio::start(handle.clone(), state.clone());
+            window::cursor::start(handle.clone(), state.clone());
             actions::handle_args(&handle, &state, std::env::args().collect());
 
             // 변경이 있으면 잠시 뒤 한 번에 저장한다.

@@ -14,6 +14,16 @@ pub const FULL: usize = 4;
 
 /// 프레임 RMS가 이보다 작으면 무음.
 const SILENCE_RMS: f32 = 2e-4;
+/// 역치 자동: 최근 이만큼(초)의 소리 크기를 본다.
+const AUTO_GATE_WINDOW_S: f32 = 8.0;
+/// 역치 자동: 최근 큰 소리(95번째 백분위)보다 이만큼(dB) 아래를 역치로 한다.
+const AUTO_GATE_BELOW_DB: f32 = 30.0;
+/// 크기가 거의 변하지 않는(위아래 차이가 이보다 작은) 소리는 음악이 아니라 잡음으로 보고 그 위에 역치를 둔다.
+const AUTO_GATE_STEADY_DB: f32 = 6.0;
+const AUTO_GATE_MIN_DB: f32 = -80.0;
+const AUTO_GATE_MAX_DB: f32 = -24.0;
+/// 이보다 작은 프레임(디지털 무음)은 역치 자동의 기록에 넣지 않는다.
+const AUTO_GATE_IGNORE_DB: f32 = -95.0;
 /// 스펙트럼 정규화 기준의 하한 (아주 작은 잡음을 크게 키우지 않도록).
 const LEVEL_FLOOR: f32 = 1e-3;
 /// log 압축 세기: ln(1 + LOG_GAIN · mag / level)
@@ -81,6 +91,8 @@ pub struct Params {
     pub auto_interval: bool,
     /// 역치: 프레임 RMS가 이보다 작으면 무음으로 본다.
     pub silence_rms: f32,
+    /// 역치 자동: silence_rms 대신 최근 소리 크기로 역치를 정한다.
+    pub auto_gate: bool,
 }
 
 impl Default for Params {
@@ -91,6 +103,7 @@ impl Default for Params {
             min_onset_interval_ms: 120.0,
             auto_interval: false,
             silence_rms: SILENCE_RMS,
+            auto_gate: false,
         }
     }
 }
@@ -113,6 +126,68 @@ pub struct FrameOut {
     pub rms: f32,
     /// 이번 프레임에 쓴 최소 온셋 간격(ms). 간격 자동이면 박에 따라 바뀐다.
     pub gap_ms: f32,
+    /// 이번 프레임에 쓴 역치(dBFS). 역치 자동이면 소리에 따라 바뀐다.
+    pub gate_db: f32,
+}
+
+fn to_db(rms: f32) -> f32 {
+    20.0 * rms.max(1e-6).log10()
+}
+
+/// 역치 자동: 최근 프레임 크기(dB)의 분포로 역치를 정한다.
+struct AutoGate {
+    hist: VecDeque<f32>,
+    cap: usize,
+    /// 다시 계산하기까지 남은 프레임 수.
+    countdown: usize,
+    every: usize,
+    /// 지금 역치 (dB). 목표를 부드럽게 따라간다.
+    db: f32,
+    target: f32,
+    /// 프레임마다 목표를 따라가는 비율.
+    follow: f32,
+}
+
+impl AutoGate {
+    fn new(fps: f32, start_db: f32) -> Self {
+        AutoGate {
+            hist: VecDeque::new(),
+            cap: (AUTO_GATE_WINDOW_S * fps) as usize,
+            countdown: 0,
+            every: (fps / 4.0).max(1.0) as usize,
+            db: start_db,
+            target: start_db,
+            follow: 1.0 - (-1.0 / (1.0 * fps)).exp(),
+        }
+    }
+
+    fn push(&mut self, db: f32) -> f32 {
+        if db.is_finite() && db > AUTO_GATE_IGNORE_DB {
+            if self.hist.len() == self.cap {
+                self.hist.pop_front();
+            }
+            self.hist.push_back(db);
+        }
+        if self.countdown == 0 {
+            self.countdown = self.every;
+            // 1초 넘게 들은 뒤에만 정한다. 디지털 무음이 이어지는 동안은 그대로 둔다.
+            if self.hist.len() * 8 >= self.cap {
+                let mut v: Vec<f32> = self.hist.iter().copied().collect();
+                v.sort_unstable_by(f32::total_cmp);
+                let at = |q: f32| v[((v.len() - 1) as f32 * q) as usize];
+                let (low, loud) = (at(0.10), at(0.95));
+                self.target = if loud - low < AUTO_GATE_STEADY_DB {
+                    loud + 3.0
+                } else {
+                    loud - AUTO_GATE_BELOW_DB
+                }
+                .clamp(AUTO_GATE_MIN_DB, AUTO_GATE_MAX_DB);
+            }
+        }
+        self.countdown -= 1;
+        self.db += (self.target - self.db) * self.follow;
+        self.db
+    }
 }
 
 struct BandState {
@@ -169,6 +244,7 @@ pub struct Analyzer {
     prev_silent: bool,
     prev_leaked: [bool; N_BANDS],
     tempo: Tempo,
+    auto_gate: AutoGate,
 }
 
 impl Analyzer {
@@ -206,6 +282,7 @@ impl Analyzer {
             prev_silent: true,
             prev_leaked: [false; N_BANDS],
             tempo: Tempo::new(fps),
+            auto_gate: AutoGate::new(fps, to_db(params.silence_rms)),
         };
         a.set_params(params);
         a
@@ -224,6 +301,10 @@ impl Analyzer {
             let hi = ((p.hi / bin_hz).ceil() as usize).clamp(lo + 1, nbins);
             state.lo_bin = lo;
             state.hi_bin = hi;
+        }
+        // 역치 자동을 켜면 지금 손으로 정한 역치에서 출발한다.
+        if params.auto_gate && !self.params.auto_gate {
+            self.auto_gate = AutoGate::new(self.fps, to_db(params.silence_rms));
         }
         self.params = params;
     }
@@ -259,7 +340,9 @@ impl Analyzer {
         // 가장 최근 hop 구간의 크기로 무음을 판단한다.
         let recent = &x[WINDOW - HOP..];
         let rms = (recent.iter().map(|v| v * v).sum::<f32>() / HOP as f32).sqrt();
-        let silent = !(rms >= self.params.silence_rms.max(1e-5));
+        let auto_db = self.auto_gate.push(to_db(rms));
+        let gate_db = if self.params.auto_gate { auto_db } else { to_db(self.params.silence_rms) };
+        let silent = !(rms >= 10f32.powf(gate_db / 20.0).max(1e-5));
 
         for (o, (v, w)) in self.scratch.iter_mut().zip(x.iter().zip(self.window.iter())) {
             *o = if v.is_finite() { v * w } else { 0.0 };
@@ -302,7 +385,7 @@ impl Analyzer {
         let n = self.frame;
         self.frame += 1;
         let was_silent = std::mem::replace(&mut self.prev_silent, silent);
-        let mut out = FrameOut { silent, rms: if rms.is_finite() { rms } else { 0.0 }, ..Default::default() };
+        let mut out = FrameOut { silent, rms: if rms.is_finite() { rms } else { 0.0 }, gate_db, ..Default::default() };
         let hist_len = (0.5 * self.fps).round().max(4.0) as usize;
         // 최소 온셋 간격: 간격 자동이고 박이 잡혀 있으면 박 간격의 일부(16분음표보다 조금 짧게), 아니면 설정값.
         let gap_ms = match (self.params.auto_interval, self.tempo.period) {
@@ -948,6 +1031,42 @@ mod tests {
         };
         assert_eq!(run_with(-74.0), times.len());
         assert_eq!(run_with(-20.0), 0);
+    }
+
+    #[test]
+    fn auto_gate_follows_the_music_level() {
+        // 음악 비슷한 신호: 220Hz 음 위에 0.5초마다(120BPM) 클릭. 같은 곡을 크게/작게 틀어 본다.
+        let times = every(0.5, 0.1, 10.0);
+        let clicks_sig = clicks(&times, 10.0, 0.5);
+        let song: Vec<f32> =
+            clicks_sig.iter().enumerate().map(|(i, c)| c + 0.1 * (i as f32 * 220.0 * std::f32::consts::TAU / SR as f32).sin()).collect();
+        let run_at = |gain: f32| {
+            let mut a = Analyzer::new(SR, Params { silence_rms: 10f32.powf(-74.0 / 20.0), auto_gate: true, ..Params::default() });
+            let mut out = Vec::new();
+            for chunk in song.chunks(480) {
+                let c: Vec<f32> = chunk.iter().map(|v| v * gain).collect();
+                a.push(&c, &mut out);
+            }
+            let late = &out[out.len() / 2..];
+            (out.last().unwrap().gate_db, late.iter().filter(|f| f.bands[FULL].onset).count())
+        };
+        let (loud_gate, loud_onsets) = run_at(0.3);
+        let (quiet_gate, quiet_onsets) = run_at(0.015); // -26dB
+        // 역치는 곡의 크기를 따라 내려가고, 작게 틀어도 박은 계속 잡힌다.
+        assert!(loud_gate > -60.0 && loud_gate < -24.0, "loud gate {loud_gate}");
+        assert!((loud_gate - quiet_gate - 26.0).abs() < 6.0, "loud {loud_gate} quiet {quiet_gate}");
+        let expected = times.iter().filter(|&&t| t > 5.0).count();
+        assert!(loud_onsets + 2 >= expected && quiet_onsets + 2 >= expected, "{loud_onsets}/{quiet_onsets} of {expected}");
+
+        // 크기가 일정한 잡음뿐이면 역치가 잡음 위로 올라가 반응하지 않는다.
+        let mut rng = Rng(9);
+        let noise: Vec<f32> = (0..SR as usize * 6).map(|_| rng.next() * 0.003).collect();
+        let mut a = Analyzer::new(SR, Params { silence_rms: 10f32.powf(-90.0 / 20.0), auto_gate: true, ..Params::default() });
+        let mut out = Vec::new();
+        for chunk in noise.chunks(480) {
+            a.push(chunk, &mut out);
+        }
+        assert!(out.iter().skip(out.len() * 2 / 3).all(|f| f.silent));
     }
 
     #[test]

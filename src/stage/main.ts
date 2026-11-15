@@ -1,4 +1,4 @@
-import { api, imageUrl, onAudioFrame, onConfigChanged, onRuntimeChanged } from "../shared/api";
+import { api, imageUrl, onAudioFrame, onConfigChanged, onCursor, onRuntimeChanged } from "../shared/api";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { StageRenderer } from "./renderer";
 
@@ -19,6 +19,7 @@ async function main() {
     if (c.origin !== self) renderer.setConfig(c.config);
   });
   await onRuntimeChanged((r) => renderer.setEditing(r.editMode));
+  await onCursor((p) => renderer.setMouse(p));
 
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") void api.setEditMode(false);

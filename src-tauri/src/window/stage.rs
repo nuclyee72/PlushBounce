@@ -9,6 +9,8 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 static REBUILD: Mutex<()> = Mutex::new(());
+/// 지금 stage 창이 덮는 화면 영역 (물리 픽셀: x, y, 너비, 높이).
+pub static STAGE_RECT: Mutex<(i32, i32, u32, u32)> = Mutex::new((0, 0, 1, 1));
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -108,6 +110,7 @@ fn build(app: &AppHandle, state: &Shared, mode: Mode) -> Result<WebviewWindow, S
 
     let _ = win.set_position(PhysicalPosition::new(mon.x, mon.y));
     let _ = win.set_size(PhysicalSize::new(mon.w, mon.h));
+    *lock(&STAGE_RECT) = (mon.x, mon.y, mon.w, mon.h);
     let hwnd = win.hwnd().map_err(|e| e.to_string())?;
 
     let placed = if pet {

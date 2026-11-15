@@ -40,6 +40,14 @@ const EDIT_SEND_MS = 70;
 const FOLLOW_DRAG_S = 0.045;
 const FOLLOW_S = 0.11;
 const IDLE_AFTER_MS = 2000;
+/** 자동 움직임(숨쉬기) 한 주기의 기본 길이(초): 2π × 0.56. */
+const IDLE_PERIOD_S = 0.56;
+/** 마우스가 인형에서 이만큼(px) + 인형 높이의 HOVER_REACH_H 안에 오면 흐려지기 시작한다. */
+const HOVER_REACH_PX = 40;
+const HOVER_REACH_H = 0.35;
+/** 흐려지는 / 되돌아오는 데 걸리는 시간(초). */
+const FADE_OUT_S = 0.12;
+const FADE_IN_S = 0.35;
 
 export class StageRenderer {
   private ctx: CanvasRenderingContext2D;
@@ -75,6 +83,12 @@ export class StageRenderer {
   private dirty = true;
   private lastDemo = 0;
   private clock: BeatClock = { period: null, lastBeat: 0 };
+  /** 마우스 위치 (창 기준 비율). null = 모른다. */
+  private mouse: { x: number; y: number } | null = null;
+  /** 자동 움직임의 위상 (빠르기를 바꿔도 튀지 않도록 쌓아 간다). */
+  private idlePhase = 0;
+  /** 이 시각까지는 소리와 상관없이 자동 움직임을 보여 준다 (설정을 바꾸는 동안 미리보기). */
+  private idleShowUntil = 0;
   private ro: ResizeObserver;
   private dead = false;
   selectedId: string | null = null;
@@ -169,6 +183,18 @@ export class StageRenderer {
     for (const d of this.drawOrder) this.sprites.get(d.id)?.bounce(1, 0.5, now);
   }
 
+  /** 자동 움직임 설정을 바꾸는 동안: 잠시 소리와 상관없이 숨쉬기를 보여 준다. */
+  showIdle(): void {
+    this.idleShowUntil = performance.now() + 2500;
+    this.dirty = true;
+  }
+
+  /** 자동 움직임의 세기 0..1 (무음이 이어지면 천천히 켜진다). */
+  private idleLevel(now: number, silentFor: number): number {
+    const fromSilence = Math.min(1, Math.max(0, (silentFor - IDLE_AFTER_MS) / 1500));
+    return Math.max(fromSilence, now < this.idleShowUntil ? 1 : 0);
+  }
+
   /** 지금 박 간격(초). 박을 모르면 null. */
   private periodS(): number | null {
     return this.clock.period ? this.clock.period / 1000 : null;
@@ -187,6 +213,12 @@ export class StageRenderer {
       this.selectedLine = id;
       this.dirty = true;
     }
+  }
+
+  /** 마우스 위치 (stage 창 기준 비율). 가까운 인형이 흐려진다. */
+  setMouse(p: { x: number; y: number } | null): void {
+    this.mouse = p;
+    this.dirty = true;
   }
 
   setEditing(on: boolean): void {
@@ -346,6 +378,8 @@ export class StageRenderer {
     const silentFor = this.silentSince === null ? 0 : now - this.silentSince;
 
     let moving = false;
+    this.idlePhase = (this.idlePhase + (dt * (cfg.motion.idleSpeed ?? 1)) / IDLE_PERIOD_S) % (Math.PI * 2000);
+    if (this.fade(cfg, dt)) moving = true;
     const lag = (cfg.motion.latencyMs ?? 0) / 1000;
     const dragged = this.drag?.kind === "doll" ? this.drag.id : null;
     for (const d of this.drawOrder) {
@@ -382,13 +416,50 @@ export class StageRenderer {
     // 무음 + 정지 상태에서는 프레임을 낮춘다.
     // 무음이 이어지면 숨쉬기(idle) 동작이 있으므로 그 동안도 매 프레임 그린다 (예전엔 15fps라 뚝뚝 끊겨 보였다).
     // 정말 아무것도 움직이지 않는 동안(소리가 막 끊긴 뒤 숨쉬기가 시작되기 전)만 프레임을 낮춘다.
-    const breathing = silentFor > IDLE_AFTER_MS;
+    const breathing = this.idleLevel(now, silentFor) > 0 && (cfg.motion.idleAmount ?? 0) > 0;
     const busy = moving || breathing || this.dirty || this.drag !== null || silentFor === 0;
     if (!busy && t - this.lastDraw < 66) return;
     this.lastDraw = t;
     this.dirty = false;
     this.draw(cfg, now, silentFor);
   };
+
+  /**
+   * 마우스 근처의 인형을 흐리게 한다: 거리에 따라 부드럽게, 시간에 따라 천천히.
+   * 편집 중이거나 미리보기에서는 하지 않는다. 아직 바뀌는 중이면 true.
+   */
+  private fade(cfg: Config, dt: number): boolean {
+    const on = cfg.display.hoverFade !== false && !this.editing && !this.opts.preview && this.mouse !== null;
+    const max = Math.min(1, Math.max(0, cfg.display.hoverFadeMax ?? 0.7));
+    let changing = false;
+    for (const d of this.drawOrder) {
+      const s = this.sprites.get(d.id);
+      if (!s) continue;
+      let target = 1;
+      const p = this.shown.get(d.id) ?? this.placed.get(d.id);
+      if (on && p && max > 0) {
+        const h = p.scale * this.h;
+        const w = h * d.aspect;
+        const mx = this.mouse!.x * this.w;
+        const my = this.mouse!.y * this.h;
+        const px = p.x * this.w;
+        const py = p.y * this.h;
+        const dx = Math.max(px - w / 2 - mx, 0, mx - (px + w / 2));
+        const dy = Math.max(py - h - my, 0, my - py);
+        const reach = HOVER_REACH_PX + HOVER_REACH_H * h;
+        const near = 1 - Math.min(1, Math.hypot(dx, dy) / reach);
+        target = 1 - max * near * near * (3 - 2 * near);
+      }
+      const diff = target - s.alpha;
+      if (Math.abs(diff) < 0.002) {
+        s.alpha = target;
+        continue;
+      }
+      changing = true;
+      s.alpha = dt > 0 ? s.alpha + diff * (1 - Math.exp(-dt / (diff < 0 ? FADE_OUT_S : FADE_IN_S))) : s.alpha;
+    }
+    return changing;
+  }
 
   private draw(cfg: Config, now: number, silentFor: number): void {
     const ctx = this.ctx;
@@ -401,15 +472,17 @@ export class StageRenderer {
       ctx.fillRect(0, 0, this.w, this.h);
     }
 
-    const idle = Math.min(1, Math.max(0, (silentFor - IDLE_AFTER_MS) / 1500));
+    const idle = this.idleLevel(now, silentFor) * (cfg.motion.idleAmount ?? 0.22);
     this.drawOrder.forEach((d, i) => {
       const p = this.shown.get(d.id) ?? this.placed.get(d.id);
       const s = this.sprites.get(d.id);
       if (!p || !s) return;
-      const breath = idle > 0 ? idle * 0.22 * Math.sin(now / 560 + i * 0.9) : 0;
+      const breath = idle > 0 ? idle * Math.sin(this.idlePhase + i * 0.9) : 0;
       const px = p.x * this.w;
       const py = p.y * this.h;
+      ctx.globalAlpha = s.alpha;
       s.draw(ctx, px, py, p.scale * this.h, d.aspect, d.flip, s.x + breath, cfg.motion.amount);
+      ctx.globalAlpha = 1;
       if (this.opts.preview) {
         // 깜빡임도 타이밍 보정만큼 늦게 (flashAt이 미래일 수 있다).
         const flash = now < s.flashAt ? 0 : Math.max(0, 1 - (now - s.flashAt) / 180);

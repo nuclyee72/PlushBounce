@@ -5,6 +5,7 @@ import type {
   AudioSession,
   Config,
   ConfigChanged,
+  CursorPos,
   MonitorInfo,
   Runtime,
 } from "./types";
@@ -33,6 +34,9 @@ export const onAudioFrame = (cb: (f: AudioFrame) => void): Promise<UnlistenFn> =
 
 export const onConfigChanged = (cb: (c: ConfigChanged) => void): Promise<UnlistenFn> =>
   listen<ConfigChanged>("config-changed", (e) => cb(e.payload));
+
+export const onCursor = (cb: (p: CursorPos) => void): Promise<UnlistenFn> =>
+  listen<CursorPos>("cursor", (e) => cb(e.payload));
 
 export const onRuntimeChanged = (cb: (r: Runtime) => void): Promise<UnlistenFn> =>
   listen<Runtime>("runtime-changed", (e) => cb(e.payload));

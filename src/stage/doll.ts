@@ -12,6 +12,8 @@ export class DollSprite {
   flashAt = -1e9;
   /** 마지막으로 소리를 받아들인 시각 (박 거르기용. 타이밍 보정과 무관한 실제 시각). */
   acceptedAt = -1e9;
+  /** 그릴 때의 불투명도 (마우스가 가까우면 줄어든다). */
+  alpha = 1;
 
   setImage(url: string, onLoad: () => void): void {
     if (url === this.url) return;
