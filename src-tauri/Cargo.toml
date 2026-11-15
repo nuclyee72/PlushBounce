@@ -1,6 +1,6 @@
 [package]
 name = "plushbounce"
-version = "0.1.0"
+version = "0.2.0"
 description = "음악에 맞춰 꿍실거리는 인형 데스크톱 앱"
 edition = "2021"
 
