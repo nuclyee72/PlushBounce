@@ -37,6 +37,11 @@ export const DOLL_EXTENSIONS = [
   "png", "webp", "gif", "jpg", "jpeg", "jfif", "jpe", "bmp", "dib", "tif", "tiff", "ico", "tga", "qoi", "dds", "pbm", "pgm", "ppm", "pnm",
 ];
 
+/** 인형의 동작: squash = 위아래로 눌렸다 펴짐, sway = 바닥은 그대로 두고 위쪽이 좌우로 기울어짐(사다리꼴). */
+export type Action = "squash" | "sway";
+export const ACTIONS: Action[] = ["squash", "sway"];
+export const ACTION_LABELS: Record<Action, string> = { squash: "Squash", sway: "Sway" };
+
 export type Pt = { x: number; y: number };
 
 /** system: 시스템 전체. apps: 고른 앱들(실행 파일 이름)의 소리만 합쳐서. */
@@ -65,6 +70,8 @@ export type Doll = {
   at?: number | null;
   /** 조작 창 목록에서 묶어 두는 그룹의 id. 없으면 그룹 없음 (화면 동작과는 상관없다). */
   group?: string | null;
+  /** 이 인형만의 동작. 없으면 전체 기본값(motion.action). */
+  action?: Action | null;
   manual: { layout: boolean; band: boolean };
 };
 
@@ -112,6 +119,10 @@ export type Config = {
     damping: number;
     /** 화면 지연 보정(ms). 양수면 인형이 늦게, 음수면 일찍 움직인다. */
     latencyMs: number;
+    /** 기본 동작 (인형마다 바꿀 수 있다). */
+    action?: Action;
+    /** Sway: 꼭대기가 옆으로 밀리는 정도 (인형 너비 대비). */
+    swayAmount?: number;
     /** 자동 움직임(소리가 없을 때 숨쉬기)의 크기. 0이면 끈다. */
     idleAmount: number;
     /** 자동 움직임의 빠르기 배율 (1 = 기본). */

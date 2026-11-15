@@ -128,6 +128,17 @@ pub enum Assign {
     Together,
 }
 
+/// 인형의 동작.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Action {
+    /// 위아래로 눌렸다 펴짐 (처음부터 있던 동작).
+    #[default]
+    Squash,
+    /// 바닥은 그대로 두고 위쪽이 좌우로 번갈아 기울어짐 (사다리꼴).
+    Sway,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct MotionCfg {
     pub sync: Sync,
@@ -144,6 +155,18 @@ pub struct MotionCfg {
     /// 자동 움직임의 빠르기 배율 (1 = 기본).
     #[serde(rename = "idleSpeed", default = "one")]
     pub idle_speed: f32,
+    /// 기본 동작 (인형마다 바꿀 수 있다).
+    #[serde(default)]
+    pub action: Action,
+    /// Sway: 꼭대기가 옆으로 밀리는 정도 (인형 너비 대비).
+    #[serde(rename = "swayAmount", default = "default_sway_amount")]
+    pub sway_amount: f32,
+}
+
+pub const DEFAULT_SWAY_AMOUNT: f32 = 0.25;
+
+fn default_sway_amount() -> f32 {
+    DEFAULT_SWAY_AMOUNT
 }
 
 pub const DEFAULT_IDLE_AMOUNT: f32 = 0.22;
@@ -227,6 +250,9 @@ pub struct Doll {
     /// 조작 창 목록에서 묶어 두는 그룹의 id. 없으면 그룹 없음. 화면 동작에는 영향이 없다.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    /// 이 인형만의 동작. 없으면 전체 기본값.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<Action>,
     pub manual: Manual,
 }
 
@@ -315,6 +341,8 @@ impl Config {
                 latency_ms: 0.0,
                 idle_amount: DEFAULT_IDLE_AMOUNT,
                 idle_speed: 1.0,
+                action: Action::Squash,
+                sway_amount: DEFAULT_SWAY_AMOUNT,
             },
             lines: vec![Line {
                 id: FIRST_LINE.into(),
@@ -369,6 +397,7 @@ impl Config {
         fix(&mut self.motion.latency_ms, LATENCY_MIN_MS, LATENCY_MAX_MS, 0.0);
         fix(&mut self.motion.idle_amount, 0.0, 0.6, DEFAULT_IDLE_AMOUNT);
         fix(&mut self.motion.idle_speed, 0.25, 4.0, 1.0);
+        fix(&mut self.motion.sway_amount, 0.0, 0.6, DEFAULT_SWAY_AMOUNT);
         fix(&mut self.display.hover_fade_max, 0.0, 1.0, DEFAULT_HOVER_FADE_MAX);
 
         // 소스: 예전 형식(앱 하나)은 앱 목록으로 옮기고, 이름이 겹치거나 비면 정리한다.
@@ -523,8 +552,29 @@ mod tests {
             line: String::new(),
             at: None,
             group: None,
+            action: None,
             manual: Manual::default(),
         }
+    }
+
+    #[test]
+    fn actions_default_to_squash_and_round_trip() {
+        let mut c = Config::default_with(0.95);
+        c.dolls = (0..2).map(doll).collect();
+        c.dolls[1].action = Some(Action::Sway);
+        c.motion.sway_amount = 9.0;
+        c.normalize();
+        assert_eq!(c.motion.sway_amount, 0.6);
+        let text = serde_json::to_string(&c).unwrap();
+        assert!(text.contains("\"action\":\"sway\"") && text.contains("\"swayAmount\""));
+        assert_eq!(serde_json::from_str::<Config>(&text).unwrap(), c);
+        // 동작이 없던 예전 파일: 기본 동작은 Squash, 인형은 기본값을 따른다.
+        let mut v = serde_json::to_value(&c).unwrap();
+        v["motion"].as_object_mut().unwrap().remove("action");
+        v["motion"].as_object_mut().unwrap().remove("swayAmount");
+        v["dolls"][1].as_object_mut().unwrap().remove("action");
+        let old: Config = serde_json::from_value(v).unwrap();
+        assert_eq!((old.motion.action, old.motion.sway_amount, old.dolls[1].action), (Action::Squash, DEFAULT_SWAY_AMOUNT, None));
     }
 
     #[test]

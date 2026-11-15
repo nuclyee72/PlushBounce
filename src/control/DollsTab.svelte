@@ -2,8 +2,8 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { onDestroy, tick } from "svelte";
   import { api, imageUrl } from "../shared/api";
-  import { BAND_LABELS, DOLL_BAND_COLORS, DOLL_BAND_LABELS, DOLL_BANDS, DOLL_EXTENSIONS } from "../shared/types";
-  import type { Doll, Group, Line } from "../shared/types";
+  import { ACTION_LABELS, ACTIONS, BAND_LABELS, DOLL_BAND_COLORS, DOLL_BAND_LABELS, DOLL_BANDS, DOLL_EXTENSIONS } from "../shared/types";
+  import type { Action, Doll, Group, Line } from "../shared/types";
   import Icon from "./Icon.svelte";
   import Slider from "./Slider.svelte";
   import { addDolls, app, commit, fail, getRenderer, live } from "./store.svelte";
@@ -95,6 +95,12 @@
     commit(mutate);
     getRenderer()?.demo();
   }
+
+  // ── 동작 (Squash / Sway) ──
+  const defaultAction = $derived<Action>(cfg.motion.action ?? "squash");
+  const actionOf = (d: Doll): Action => d.action ?? defaultAction;
+  /** 보이는 인형 중 이 동작을 쓰는 인형이 있는가 (없으면 그 슬라이더를 흐리게). */
+  const usesAction = (a: Action) => cfg.dolls.some((d) => d.visible && actionOf(d) === a);
 
   /** 자동 움직임 설정을 바꾸면서 미리보기에서 숨쉬기를 바로 보여 준다. */
   function idle(mutate: Parameters<typeof commit>[0]) {
@@ -255,9 +261,23 @@
   <div class="scroll">
   <div class="sliders">
     <!-- 끄는 동안 미리보기 인형이 계속 꿍실거려서 결과가 바로 보인다. -->
-    <label class="field">Squash<Slider lo="Light" hi="Deep" min={0} max={0.4} step={0.005} value={cfg.motion.amount} oninput={(v) => motion((c) => (c.motion.amount = v))} /></label>
+    <!-- 동작: 기본값을 여기서 고르고, 인형을 골라 그 인형만 다르게 할 수 있다. -->
+    <div class="field-col">
+      Action
+      <div class="seg" role="group" aria-label="Default action">
+        {#each ACTIONS as a}
+          <button class:on={defaultAction === a} aria-pressed={defaultAction === a} onclick={() => motion((c) => (c.motion.action = a))}>{ACTION_LABELS[a]}</button>
+        {/each}
+      </div>
+    </div>
+    <label class="field" class:unused={!usesAction("squash")}
+      >Squash depth<Slider lo="Light" hi="Deep" min={0} max={0.4} step={0.005} value={cfg.motion.amount} oninput={(v) => motion((c) => (c.motion.amount = v))} /></label
+    >
+    <label class="field" class:unused={!usesAction("sway")}
+      >Sway width<Slider lo="Slight" hi="Wide" min={0} max={0.6} step={0.01} value={cfg.motion.swayAmount ?? 0.25} oninput={(v) => motion((c) => (c.motion.swayAmount = v))} /></label
+    >
     <!-- 자동 움직임: 소리가 없을 때 저절로 숨쉬듯 움직인다. 0이면 끈다. 바꾸는 동안 미리보기에 바로 보여 준다. -->
-    <label class="field">Idle sway<Slider lo="Off" hi="Big" min={0} max={0.6} step={0.01} value={cfg.motion.idleAmount ?? 0.22} oninput={(v) => idle((c) => (c.motion.idleAmount = v))} /></label>
+    <label class="field">Idle motion<Slider lo="Off" hi="Big" min={0} max={0.6} step={0.01} value={cfg.motion.idleAmount ?? 0.22} oninput={(v) => idle((c) => (c.motion.idleAmount = v))} /></label>
     <label class="field">Idle speed<Slider lo="Slow" hi="Fast" min={0.25} max={3} step={0.05} value={cfg.motion.idleSpeed ?? 1} oninput={(v) => idle((c) => (c.motion.idleSpeed = v))} /></label>
   </div>
 
@@ -400,6 +420,20 @@
             >
           </div>
           <span class="tools">
+          <select
+            class="asel"
+            aria-label="Action"
+            title="Action for this doll"
+            value={s.action ?? ""}
+            onchange={(e) => {
+              const v = e.currentTarget.value as Action | "";
+              edit(s.id, (d) => (d.action = v || null));
+              getRenderer()?.demo();
+            }}
+          >
+            <option value="">Default ({ACTION_LABELS[defaultAction]})</option>
+            {#each ACTIONS as a}<option value={a}>{ACTION_LABELS[a]}</option>{/each}
+          </select>
           {#if groups.length > 0}
             <select class="gsel" aria-label="Group" title="Group" value={s.group ?? ""} onchange={(e) => setGroup(s.id, e.currentTarget.value || null)}>
               <option value="">No group</option>
@@ -669,6 +703,16 @@
     align-self: center;
     color: var(--dim);
     font-size: 12px;
+  }
+  .asel {
+    max-width: 150px;
+    padding: 4px 6px;
+  }
+  .field.unused {
+    opacity: 0.45;
+  }
+  .field-col > .seg {
+    align-self: flex-start;
   }
   .gsel {
     max-width: 140px;

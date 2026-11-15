@@ -40,6 +40,8 @@ const EDIT_SEND_MS = 70;
 const FOLLOW_DRAG_S = 0.045;
 const FOLLOW_S = 0.11;
 const IDLE_AFTER_MS = 2000;
+/** Sway: 소리가 이만큼(ms) 끊기면 노래가 사라진 것으로 보고 기운 자리에서 가운데로 돌아온다. */
+const SWAY_RELEASE_MS = 400;
 /** 자동 움직임(숨쉬기) 한 주기의 기본 길이(초): 2π × 0.56. */
 const IDLE_PERIOD_S = 0.56;
 /** 마우스가 인형에서 이만큼(px) + 인형 높이의 HOVER_REACH_H 안에 오면 흐려지기 시작한다. */
@@ -386,6 +388,8 @@ export class StageRenderer {
       const s = this.sprites.get(d.id);
       if (!s) continue;
       s.spring.lag = lag;
+      // Sway는 노래가 나오는 동안 기운 자리에서 기다린다 (설정을 만지는 동안의 시연 꿍실도 포함).
+      s.holdLean = silentFor < SWAY_RELEASE_MS || now - this.lastDemo < 1500;
       s.step(dt);
       if (!s.still) moving = true;
       // 그려지는 자리는 실제 자리를 부드럽게 따라간다 (끌기·선에 붙기·줄 다시 세우기가 미끄러지듯).
@@ -481,7 +485,13 @@ export class StageRenderer {
       const px = p.x * this.w;
       const py = p.y * this.h;
       ctx.globalAlpha = s.alpha;
-      s.draw(ctx, px, py, p.scale * this.h, d.aspect, d.flip, s.x + breath, cfg.motion.amount);
+      // 동작: 인형마다 고를 수 있고, 고르지 않았으면 전체 기본값.
+      if ((d.action ?? cfg.motion.action ?? "squash") === "sway") {
+        // 쉴 때의 숨쉬기는 좌우로 천천히 흔들리는 것으로.
+        s.drawSway(ctx, px, py, p.scale * this.h, d.aspect, d.flip, s.lean + breath, cfg.motion.swayAmount ?? 0.25);
+      } else {
+        s.draw(ctx, px, py, p.scale * this.h, d.aspect, d.flip, s.x + breath, cfg.motion.amount);
+      }
       ctx.globalAlpha = 1;
       if (this.opts.preview) {
         // 깜빡임도 타이밍 보정만큼 늦게 (flashAt이 미래일 수 있다).

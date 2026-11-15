@@ -118,7 +118,11 @@ fn build(app: &AppHandle, state: &Shared, mode: Mode) -> Result<WebviewWindow, S
         let _ = win.set_ignore_cursor_events(!edit);
         Ok(())
     } else {
-        wallpaper::attach(hwnd, (mon.x, mon.y, mon.w as i32, mon.h as i32))
+        let r = wallpaper::attach(hwnd, (mon.x, mon.y, mon.w as i32, mon.h as i32));
+        if r.is_ok() {
+            wallpaper::mark_attached(&state.config_file);
+        }
+        r
     };
     if let Err(e) = placed {
         let _ = win.destroy();
@@ -160,6 +164,10 @@ pub fn rebuild(app: &AppHandle, state: &Shared) {
             *lock(&state.stage_label) = win.label().to_string();
             if let Some(old) = old {
                 let _ = old.destroy();
+            }
+            // 바탕화면 모드에서 나왔다: 배경이 검게 남지 않도록 바탕화면을 다시 그리게 한다.
+            if lock(&state.config).display.mode != Mode::Wallpaper {
+                wallpaper::detached(&state.config_file);
             }
         }
         Err(e) => state.update_runtime(app, |r| r.display_error = Some(format!("Couldn't create the doll window. ({e})"))),

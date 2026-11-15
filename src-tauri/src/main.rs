@@ -85,6 +85,8 @@ fn main() {
             let _ = app.global_shortcut().register(Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyP));
 
             window::tray::build(&handle, &state)?;
+            // 지난번에 바탕화면 모드인 채로 제대로 끝나지 못했다면(강제 종료 등) 검게 남은 바탕화면을 되살린다.
+            window::wallpaper::recover_after_unclean_exit(&state.config_file);
             window::stage::rebuild(&handle, &state);
             audio::start(handle.clone(), state.clone());
             window::cursor::start(handle.clone(), state.clone());
@@ -140,6 +142,13 @@ fn main() {
     app.run(|app, event| {
         if let RunEvent::Exit = event {
             window::control::save_if_dirty();
+            // 바탕화면 모드였다면 창을 먼저 떼고 바탕화면을 다시 그리게 한다 (검게 남지 않도록).
+            if let Some(state) = app.try_state::<Shared>() {
+                if let Some(stage) = window::stage::current(app, &state) {
+                    let _ = stage.destroy();
+                }
+                window::wallpaper::detached(&state.config_file);
+            }
             if let Some(state) = app.try_state::<Shared>() {
                 if lock(&state.runtime).edit_mode || state.dirty.load(Ordering::Acquire) {
                     state.save_now();

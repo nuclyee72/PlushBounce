@@ -69,6 +69,7 @@ pub fn install(images_dir: &Path) -> Vec<Doll> {
             line: String::new(),
             at: None,
             group: None,
+            action: None,
             manual: Manual::default(),
         })
         .collect()
