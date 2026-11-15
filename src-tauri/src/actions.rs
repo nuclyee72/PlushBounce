@@ -83,6 +83,7 @@ pub fn add_dolls(app: &AppHandle, state: &Shared, paths: &[String]) -> (Config, 
                     size: 1.0,
                     line: String::new(),
                     at: None,
+                    group: None,
                     manual: Manual::default(),
                 });
                 order += 1;

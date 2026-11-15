@@ -128,6 +128,7 @@ fn main() {
             commands::list_audio_sessions,
             commands::add_dolls,
             commands::remove_doll,
+            commands::replace_doll_image,
             commands::set_background_image,
             commands::set_edit_mode,
             commands::export_preset,

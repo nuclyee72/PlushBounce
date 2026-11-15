@@ -224,7 +224,20 @@ pub struct Doll {
     /// 선 위에서 직접 정한 자리 (선 길이 비율, 0 = 왼쪽 끝). 없으면 자동 줄 세우기.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub at: Option<f32>,
+    /// 조작 창 목록에서 묶어 두는 그룹의 id. 없으면 그룹 없음. 화면 동작에는 영향이 없다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
     pub manual: Manual,
+}
+
+/// 조작 창의 인형 목록을 정리하는 그룹 (폴더). 화면 동작과는 상관없다.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Group {
+    pub id: String,
+    pub name: String,
+    /// 목록에서 접혀 있는가.
+    #[serde(default)]
+    pub collapsed: bool,
 }
 
 fn yes() -> bool {
@@ -245,6 +258,8 @@ pub struct Config {
     /// 예전 형식(선이 하나뿐이던 때)의 설정. 읽을 때만 쓰고 `lines`로 옮긴다.
     #[serde(default, skip_serializing)]
     pub layout: Option<LayoutCfg>,
+    #[serde(default)]
+    pub groups: Vec<Group>,
     pub dolls: Vec<Doll>,
 }
 
@@ -310,6 +325,7 @@ impl Config {
                 auto_gap: true,
             }],
             layout: None,
+            groups: Vec::new(),
             dolls: Vec::new(),
         }
     }
@@ -396,6 +412,24 @@ impl Config {
             for p in &mut line.ridge {
                 fix(&mut p.x, -1.0, 2.0, 0.5);
                 fix(&mut p.y, -1.0, 2.0, 0.7);
+            }
+        }
+        // 그룹: id가 비거나 겹치면 빼고, 이름이 비면 채운다. 없는 그룹을 가리키는 인형은 그룹 없음으로.
+        let mut seen: Vec<String> = Vec::new();
+        self.groups.retain(|g| {
+            let keep = !g.id.is_empty() && !seen.contains(&g.id);
+            seen.push(g.id.clone());
+            keep
+        });
+        for (i, g) in self.groups.iter_mut().enumerate() {
+            g.name = g.name.trim().chars().take(40).collect();
+            if g.name.is_empty() {
+                g.name = format!("Group {}", i + 1);
+            }
+        }
+        for d in &mut self.dolls {
+            if d.group.as_ref().is_some_and(|id| !self.groups.iter().any(|g| &g.id == id)) {
+                d.group = None;
             }
         }
         let first = self.lines[0].id.clone();
@@ -488,8 +522,34 @@ mod tests {
             size: 1.0,
             line: String::new(),
             at: None,
+            group: None,
             manual: Manual::default(),
         }
+    }
+
+    #[test]
+    fn groups_are_cleaned_and_round_trip() {
+        let mut c = Config::default_with(0.95);
+        c.dolls = (0..3).map(doll).collect();
+        c.groups = vec![
+            Group { id: "g1".into(), name: "  Blue  ".into(), collapsed: true },
+            Group { id: "g1".into(), name: "dup".into(), collapsed: false },
+            Group { id: "g2".into(), name: " ".into(), collapsed: false },
+        ];
+        c.dolls[0].group = Some("g1".into());
+        c.dolls[1].group = Some("gone".into());
+        c.normalize();
+        assert_eq!(c.groups.len(), 2);
+        assert_eq!((c.groups[0].name.as_str(), c.groups[0].collapsed), ("Blue", true));
+        assert_eq!(c.groups[1].name, "Group 2");
+        assert_eq!(c.dolls[0].group.as_deref(), Some("g1"));
+        assert_eq!(c.dolls[1].group, None);
+        let text = serde_json::to_string(&c).unwrap();
+        assert_eq!(serde_json::from_str::<Config>(&text).unwrap(), c);
+        // 그룹이 없던 예전 파일도 읽힌다.
+        let mut v = serde_json::to_value(&c).unwrap();
+        v.as_object_mut().unwrap().remove("groups");
+        assert!(serde_json::from_value::<Config>(v).unwrap().groups.is_empty());
     }
 
     #[test]

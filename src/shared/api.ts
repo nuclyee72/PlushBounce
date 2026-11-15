@@ -19,6 +19,7 @@ export const api = {
   sessions: () => invoke<AudioSession[]>("list_audio_sessions"),
   addDolls: (paths: string[]) => invoke<Config>("add_dolls", { paths }),
   removeDoll: (id: string) => invoke<Config>("remove_doll", { id }),
+  replaceDollImage: (id: string, path: string) => invoke<Config>("replace_doll_image", { id, path }),
   setBackgroundImage: (path: string) => invoke<Config>("set_background_image", { path }),
   setEditMode: (on: boolean) => invoke<void>("set_edit_mode", { on }),
   exportPreset: (path: string) => invoke<void>("export_preset", { path }),

@@ -1,8 +1,9 @@
 <script lang="ts">
   import { open } from "@tauri-apps/plugin-dialog";
+  import { onDestroy, tick } from "svelte";
   import { api, imageUrl } from "../shared/api";
   import { BAND_LABELS, DOLL_BAND_COLORS, DOLL_BAND_LABELS, DOLL_BANDS, DOLL_EXTENSIONS } from "../shared/types";
-  import type { Doll, Line } from "../shared/types";
+  import type { Doll, Group, Line } from "../shared/types";
   import Icon from "./Icon.svelte";
   import Slider from "./Slider.svelte";
   import { addDolls, app, commit, fail, getRenderer, live } from "./store.svelte";
@@ -18,12 +19,64 @@
       if (l) f(l);
     });
 
-  async function pick() {
+  /** 이미지를 골라 인형으로 넣는다. group을 주면 새 인형들을 그 그룹에 넣는다. */
+  async function pick(group: string | null = null) {
     const picked = await open({
       multiple: true,
       filters: [{ name: "Images", extensions: DOLL_EXTENSIONS }],
     });
-    if (picked) await addDolls(Array.isArray(picked) ? picked : [picked]);
+    if (!picked) return;
+    const before = new Set(cfg.dolls.map((d) => d.id));
+    await addDolls(Array.isArray(picked) ? picked : [picked]);
+    if (group) commit((c) => c.dolls.forEach((d) => !before.has(d.id) && (d.group = group)));
+  }
+
+  // ── 그룹 (목록 정리용 폴더) ──
+  const groups = $derived(cfg.groups ?? []);
+  /** 보이는 묶음: 그룹들 → 그룹 없음. 그룹이 하나도 없으면 묶음 하나(머리글 없음). */
+  const sections = $derived([
+    ...groups.map((g) => ({ id: g.id as string | null, group: g as Group | null, dolls: dolls.filter((d) => d.group === g.id) })),
+    { id: null, group: null, dolls: dolls.filter((d) => !d.group || !groups.some((g) => g.id === d.group)) },
+  ]);
+  const editGroup = (id: string, f: (g: Group) => void) =>
+    commit((c) => {
+      const g = c.groups?.find((x) => x.id === id);
+      if (g) f(g);
+    });
+  function renameGroup(id: string, name: string) {
+    const v = name.trim();
+    if (v) editGroup(id, (g) => (g.name = v));
+  }
+  /** 새 그룹을 만들고 이름 칸에 바로 커서를 둔다. 골라 둔 인형이 있으면 그 인형을 넣는다. */
+  async function addGroup() {
+    const n = Math.max(0, ...groups.map((g) => +(g.id.match(/\d+$/)?.[0] ?? 0))) + 1;
+    const id = `g${n}`;
+    const sel = app.selected;
+    commit((c) => {
+      c.groups = [...(c.groups ?? []), { id, name: `Group ${(c.groups?.length ?? 0) + 1}`, collapsed: false }];
+      const d = c.dolls.find((x) => x.id === sel);
+      if (d) d.group = id;
+    });
+    await tick();
+    const el = document.querySelector<HTMLInputElement>(`[data-gname="${id}"]`);
+    el?.focus();
+    el?.select();
+  }
+  /** 그룹을 지운다. 그 안의 인형은 지우지 않고 그룹 없음으로 옮긴다. */
+  function removeGroup(id: string) {
+    commit((c) => {
+      c.groups = (c.groups ?? []).filter((g) => g.id !== id);
+      for (const d of c.dolls) if (d.group === id) d.group = null;
+    });
+  }
+  function setGroup(id: string, group: string | null) {
+    edit(id, (d) => (d.group = group));
+  }
+
+  /** 고른 인형의 이미지만 새 파일로 바꾼다 (자리·크기·대역은 그대로). */
+  async function replaceImage(id: string) {
+    const picked = await open({ multiple: false, filters: [{ name: "Images", extensions: DOLL_EXTENSIONS }] });
+    if (typeof picked === "string") api.replaceDollImage(id, picked).then((c) => (app.cfg = c), fail);
   }
 
   function remove(id: string) {
@@ -115,38 +168,88 @@
 
   // ── 드래그로 순서 변경 (파일 드롭을 켜 두면 HTML5 드래그를 쓸 수 없어 포인터로 처리) ──
   let dragId = $state<string | null>(null);
+  /** 끌고 있는 인형이 지금 올라가 있는 그룹 ("" = 그룹 없음). */
+  let dragOver = $state<string | null>(null);
   let moved = false;
   let startX = 0;
 
+  let startY = 0;
+  // 끄는 동안의 움직임은 창 전체에서 받는다: 인형이 다른 그룹으로 옮겨 가면 썸네일이 새로 만들어져
+  // 썸네일에 걸어 둔 포인터 이벤트가 끊기기 때문이다.
   function down(e: PointerEvent, id: string) {
     if (e.button !== 0 || (e.target as HTMLElement).closest("button.mini")) return;
+    e.preventDefault();
     dragId = id;
     moved = false;
     startX = e.clientX;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    startY = e.clientY;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+  }
+  function stopDrag() {
+    dragId = null;
+    dragOver = null;
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    window.removeEventListener("pointercancel", cancel);
   }
   function move(e: PointerEvent) {
     if (!dragId) return;
-    if (!moved && Math.abs(e.clientX - startX) < 6) return;
+    if (!moved && Math.hypot(e.clientX - startX, e.clientY - startY) < 6) return;
     moved = true;
-    const over = document
-      .elementsFromPoint(e.clientX, e.clientY)
-      .map((el) => (el as HTMLElement).closest<HTMLElement>("[data-doll]"))
-      .find((el) => el && el.dataset.doll !== dragId);
+    const under = document.elementsFromPoint(e.clientX, e.clientY) as HTMLElement[];
+    const id = dragId;
+    // 그룹: 다른 그룹의 칸(머리글 포함) 위로 오면 그 그룹으로 옮긴다.
+    const sec = under.map((el) => el.closest<HTMLElement>("[data-group]")).find(Boolean);
+    if (sec) {
+      dragOver = sec.dataset.group ?? "";
+      const group = dragOver || null;
+      const cur = cfg.dolls.find((d) => d.id === id);
+      if (cur && (cur.group ?? null) !== group) setGroup(id, group);
+    }
+    // 순서: 다른 인형 위로 오면 그 자리로 (화면의 줄 순서도 같이 바뀐다).
+    const over = under.map((el) => el.closest<HTMLElement>("[data-doll]")).find((el) => el && el.dataset.doll !== id);
     const target = over?.dataset.doll;
     if (!target) return;
     const ids = dolls.map((d) => d.id);
-    const from = ids.indexOf(dragId);
+    const from = ids.indexOf(id);
     const to = ids.indexOf(target);
     if (from < 0 || to < 0) return;
     ids.splice(to, 0, ...ids.splice(from, 1));
     commit((c) => c.dolls.forEach((d) => (d.order = ids.indexOf(d.id))));
   }
-  function up(id: string) {
-    if (dragId && !moved) app.selected = app.selected === id ? null : id;
-    dragId = null;
+  function up() {
+    // 끌지 않고 뗐으면 누르기: 그 인형을 고르거나 고르기를 푼다.
+    if (dragId && !moved) app.selected = app.selected === dragId ? null : dragId;
+    stopDrag();
   }
+  const cancel = () => stopDrag();
+  onDestroy(stopDrag);
 </script>
+
+{#snippet thumb(d: Doll)}
+  <div
+    class="thumb"
+    class:sel={d.id === app.selected}
+    class:off={!d.visible}
+    class:drag={d.id === dragId}
+    class:dashed={d.react === "every"}
+    data-doll={d.id}
+    role="button"
+    tabindex="0"
+    aria-label="Doll"
+    style="--band:{DOLL_BAND_COLORS[d.band]};--flash:{flashOf(d)}"
+    onpointerdown={(e) => down(e, d.id)}
+    onkeydown={(e) => e.key === "Enter" && (app.selected = app.selected === d.id ? null : d.id)}
+  >
+    <img src={imageUrl(app.imagesDir, d.image)} alt="" draggable="false" style={d.flip ? "transform:scaleX(-1)" : ""} />
+    <button class="mini eye" aria-label={d.visible ? "Hide" : "Show"} onclick={() => edit(d.id, (x) => (x.visible = !x.visible))}>
+      <Icon name={d.visible ? "eye" : "eyeOff"} />
+    </button>
+    <button class="mini del" aria-label="Delete" onclick={() => remove(d.id)}><Icon name="x" /></button>
+  </div>
+{/snippet}
 
   <!-- 탭 전체가 한 덩어리로 스크롤된다 (인형 목록은 따로 스크롤하지 않고 줄을 바꿔 늘어선다). -->
   <div class="scroll">
@@ -199,39 +302,73 @@
     </div>
   </fieldset>
 
-  <div class="strip" class:hot={app.dropping}>
-    {#each dolls as d (d.id)}
-      <div
-        class="thumb"
-        class:sel={d.id === app.selected}
-        class:off={!d.visible}
-        class:drag={d.id === dragId}
-        class:dashed={d.react === "every"}
-        data-doll={d.id}
-        role="button"
-        tabindex="0"
-        aria-label="Doll"
-        style="--band:{DOLL_BAND_COLORS[d.band]};--flash:{flashOf(d)}"
-        onpointerdown={(e) => down(e, d.id)}
-        onpointermove={move}
-        onpointerup={() => up(d.id)}
-        onpointercancel={() => (dragId = null)}
-        onkeydown={(e) => e.key === "Enter" && (app.selected = app.selected === d.id ? null : d.id)}
-      >
-        <img src={imageUrl(app.imagesDir, d.image)} alt="" draggable="false" style={d.flip ? "transform:scaleX(-1)" : ""} />
-        <button class="mini eye" aria-label={d.visible ? "Hide" : "Show"} onclick={() => edit(d.id, (x) => (x.visible = !x.visible))}>
-          <Icon name={d.visible ? "eye" : "eyeOff"} />
-        </button>
-        <button class="mini del" aria-label="Delete" onclick={() => remove(d.id)}><Icon name="x" /></button>
-      </div>
-    {/each}
-    {#if dolls.length === 0}
-      <button class="drop" class:hot={app.dropping} onclick={pick} aria-label="Add images">
+  <!-- 인형 목록. 그룹은 목록을 정리하는 폴더일 뿐이다(화면의 순서·움직임은 그대로).
+       인형을 다른 그룹의 인형이나 그룹 머리글 위로 끌면 그 그룹으로 옮겨 간다. -->
+  <div class="list" class:hot={app.dropping}>
+    <div class="list-head">
+      <span class="title">Dolls <small>{dolls.length}</small></span>
+      {#if dolls.length > 0}
+        <button class="ghost" onclick={addGroup}><Icon name="folder" />New group</button>
+      {/if}
+    </div>
+    {#if dolls.length === 0 && groups.length === 0}
+      <button class="drop" class:hot={app.dropping} onclick={() => pick()} aria-label="Add images">
         <Icon name="image" />
         <span>Drop images here</span>
       </button>
     {:else}
-      <button class="thumb add" aria-label="Add images" onclick={pick}><Icon name="plus" /></button>
+      {#each sections as sec (sec.id ?? "")}
+        {@const g = sec.group}
+        {#if g || groups.length === 0 || sec.dolls.length > 0 || dragId !== null}
+          <section class="group" class:target={dragId !== null && dragOver === (sec.id ?? "")} data-group={sec.id ?? ""}>
+            {#if groups.length > 0}
+              <div class="ghead">
+                {#if g}
+                  <button
+                    class="chev"
+                    class:shut={g.collapsed}
+                    aria-label={g.collapsed ? "Expand" : "Collapse"}
+                    aria-expanded={!g.collapsed}
+                    onclick={() => editGroup(g.id, (x) => (x.collapsed = !x.collapsed))}><Icon name="chevron" /></button
+                  >
+                  <input
+                    class="gname"
+                    data-gname={g.id}
+                    aria-label="Group name"
+                    value={g.name}
+                    maxlength="40"
+                    onchange={(e) => renameGroup(g.id, e.currentTarget.value)}
+                    onkeydown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                  />
+                {:else}
+                  <span class="chev-space"></span>
+                  <span class="gname plain">Ungrouped</span>
+                {/if}
+                <span class="count">{sec.dolls.length}</span>
+                {#if g?.collapsed && sec.dolls.length}
+                  <span class="peek" aria-hidden="true">
+                    {#each sec.dolls.slice(0, 6) as d (d.id)}<img src={imageUrl(app.imagesDir, d.image)} alt="" draggable="false" />{/each}
+                  </span>
+                {/if}
+                {#if g}
+                  <button class="gdel" aria-label="Delete group" title="Delete group (dolls are kept)" onclick={() => removeGroup(g.id)}><Icon name="trash" /></button>
+                {/if}
+              </div>
+            {/if}
+            {#if !g?.collapsed}
+              <div class="strip">
+                {#each sec.dolls as d (d.id)}
+                  {@render thumb(d)}
+                {/each}
+                <button class="thumb add" aria-label="Add images" title="Add images" onclick={() => pick(sec.id)}><Icon name="plus" /></button>
+                {#if g && sec.dolls.length === 0}
+                  <span class="empty">Drag dolls here, or add images</span>
+                {/if}
+              </div>
+            {/if}
+          </section>
+        {/if}
+      {/each}
     {/if}
   </div>
 
@@ -263,6 +400,13 @@
             >
           </div>
           <span class="tools">
+          {#if groups.length > 0}
+            <select class="gsel" aria-label="Group" title="Group" value={s.group ?? ""} onchange={(e) => setGroup(s.id, e.currentTarget.value || null)}>
+              <option value="">No group</option>
+              {#each groups as g (g.id)}<option value={g.id}>{g.name}</option>{/each}
+            </select>
+          {/if}
+          <button aria-label="Replace image" title="Replace image" onclick={() => replaceImage(s.id)}><Icon name="image" /></button>
           <button class:on={s.flip} aria-label="Flip" title="Flip" onclick={() => edit(s.id, (d) => (d.flip = !d.flip))}><Icon name="flip" /></button>
           <button
             aria-label="Reset to auto"
@@ -307,7 +451,7 @@
     height: 40px;
   }
   .drop.hot,
-  .strip.hot {
+  .list.hot {
     border-color: var(--accent);
     color: var(--accent);
   }
@@ -356,7 +500,7 @@
   .lines .del:not(:disabled):hover {
     color: var(--danger);
   }
-  .strip .drop {
+  .list .drop {
     flex: 1;
     height: 72px;
     min-height: 0;
@@ -364,7 +508,7 @@
     font-size: 14px;
     border-radius: 12px;
   }
-  .strip .drop :global(svg.icon) {
+  .list .drop :global(svg.icon) {
     width: 24px;
     height: 24px;
   }
@@ -388,14 +532,153 @@
     width: 15px;
     height: 16px;
   }
+  .list {
+    display: grid;
+    gap: 2px;
+    padding: 6px 8px 8px;
+    border: 2px dashed transparent;
+    border-radius: 12px;
+    background: var(--panel);
+  }
+  .list-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 30px;
+    padding: 0 2px 2px 4px;
+  }
+  .list-head .title {
+    font-weight: 600;
+  }
+  .list-head small {
+    margin-left: 4px;
+    font-weight: 400;
+    color: var(--dim);
+  }
+  .ghost {
+    padding: 4px 10px;
+    border-radius: 999px;
+    border-color: transparent;
+    background: none;
+    color: var(--dim);
+    font-size: 12px;
+  }
+  .ghost:hover {
+    color: var(--text);
+    background: var(--raised);
+  }
+  .group {
+    border-radius: 10px;
+    transition: background 0.15s;
+  }
+  .group + .group {
+    border-top: 1px solid var(--line);
+    border-radius: 0;
+  }
+  .group.target {
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+  .ghead {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+    padding: 2px 2px 0;
+  }
+  .chev,
+  .gdel {
+    padding: 3px;
+    border: 0;
+    background: none;
+    color: var(--dim);
+  }
+  .chev :global(svg.icon),
+  .gdel :global(svg.icon) {
+    width: 16px;
+    height: 16px;
+  }
+  .chev :global(svg.icon) {
+    transition: transform 0.15s;
+  }
+  .chev.shut :global(svg.icon) {
+    transform: rotate(-90deg);
+  }
+  .chev-space {
+    width: 22px;
+  }
+  .gname {
+    field-sizing: content;
+    min-width: 5ch;
+    max-width: 26ch;
+    padding: 3px 6px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    font-weight: 600;
+  }
+  .gname:hover,
+  .gname:focus {
+    border-color: var(--line);
+    background: var(--raised);
+  }
+  .gname.plain {
+    font-weight: 400;
+    color: var(--dim);
+  }
+  .count {
+    min-width: 20px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--raised);
+    color: var(--dim);
+    font-size: 11px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .peek {
+    display: inline-flex;
+    margin-left: 4px;
+  }
+  .peek img {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+    margin-left: -6px;
+    border-radius: 6px;
+    background: var(--raised);
+    border: 1px solid var(--panel);
+  }
+  .peek img:first-child {
+    margin-left: 0;
+  }
+  .gdel {
+    margin-left: auto;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .ghead:hover .gdel,
+  .gdel:focus-visible {
+    opacity: 1;
+  }
+  .gdel:hover {
+    color: var(--danger);
+  }
+  .empty {
+    align-self: center;
+    color: var(--dim);
+    font-size: 12px;
+  }
+  .gsel {
+    max-width: 140px;
+    padding: 4px 6px;
+  }
   .strip {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
-    padding: 8px;
-    border: 2px dashed transparent;
-    border-radius: 12px;
-    background: var(--panel);
+    padding: 6px 2px 8px;
   }
   .thumb {
     position: relative;

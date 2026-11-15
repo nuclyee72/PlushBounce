@@ -63,8 +63,13 @@ export type Doll = {
   line: string; // 속한 선의 id
   /** 선 위에서 직접 정한 자리 (선 길이 비율, 0 = 왼쪽 끝). 없으면 자동 줄 세우기. */
   at?: number | null;
+  /** 조작 창 목록에서 묶어 두는 그룹의 id. 없으면 그룹 없음 (화면 동작과는 상관없다). */
+  group?: string | null;
   manual: { layout: boolean; band: boolean };
 };
+
+/** 조작 창의 인형 목록을 정리하는 그룹 (폴더). */
+export type Group = { id: string; name: string; collapsed: boolean };
 
 export type LayoutCfg = {
   ridge: [Pt, Pt, Pt];
@@ -113,6 +118,7 @@ export type Config = {
     idleSpeed: number;
   };
   lines: Line[];
+  groups?: Group[];
   dolls: Doll[];
 };
 

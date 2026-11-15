@@ -70,6 +70,28 @@ pub async fn remove_doll(app: AppHandle, state: S<'_>, id: String) -> Result<Con
     Ok(actions::apply_config(&app, &state, cfg, "rust"))
 }
 
+/// 인형의 이미지만 새 파일로 바꾼다. 자리·크기·대역 같은 설정은 그대로 둔다.
+#[tauri::command]
+pub async fn replace_doll_image(app: AppHandle, state: S<'_>, id: String, path: String) -> Result<Config, String> {
+    if !state.config().dolls.iter().any(|d| d.id == id) {
+        return Err("That doll no longer exists.".into());
+    }
+    let (image, aspect) = images::import(Path::new(&path), &state.images_dir, &images::new_id())
+        .map_err(|_| "Couldn't open that image. Please choose a PNG, JPG, WebP, BMP or GIF file.".to_string())?;
+    // 가져오는 사이 설정이 바뀌었을 수 있으므로 지금 설정에서 다시 찾는다.
+    let mut cfg = state.config();
+    let Some(doll) = cfg.dolls.iter_mut().find(|d| d.id == id) else {
+        remove_image(&state.images_dir, &image);
+        return Err("That doll no longer exists.".into());
+    };
+    let old = std::mem::replace(&mut doll.image, image);
+    doll.aspect = aspect;
+    if !cfg.dolls.iter().any(|d| d.image == old) {
+        remove_image(&state.images_dir, &old);
+    }
+    Ok(actions::apply_config(&app, &state, cfg, "rust"))
+}
+
 /// 배경 이미지를 images 폴더로 복사하고 배경으로 지정한다.
 #[tauri::command]
 pub async fn set_background_image(app: AppHandle, state: S<'_>, path: String) -> Result<Config, String> {
