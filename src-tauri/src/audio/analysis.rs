@@ -14,12 +14,20 @@ pub const FULL: usize = 4;
 
 /// 프레임 RMS가 이보다 작으면 무음.
 const SILENCE_RMS: f32 = 2e-4;
-/// 역치 자동: 최근 이만큼(초)의 소리 크기를 본다.
-const AUTO_GATE_WINDOW_S: f32 = 8.0;
+/// 역치 자동: 최근 이만큼(초)의 소리 크기를 본다. 길면 큰 부분이 끝난 뒤에도 역치가 오래 높게 남는다.
+const AUTO_GATE_WINDOW_S: f32 = 4.0;
 /// 역치 자동: 최근 큰 소리(95번째 백분위)보다 이만큼(dB) 아래를 역치로 한다.
 const AUTO_GATE_BELOW_DB: f32 = 30.0;
-/// 크기가 거의 변하지 않는(위아래 차이가 이보다 작은) 소리는 음악이 아니라 잡음으로 보고 그 위에 역치를 둔다.
+/// 크기가 거의 변하지 않는(위아래 차이가 이보다 작은) 작은 소리는 음악이 아니라 잡음으로 보고 그 위에 역치를 둔다.
 const AUTO_GATE_STEADY_DB: f32 = 6.0;
+/// 위 규칙은 이보다 작은 소리에만 쓴다. 크고 고른 소리는 꽉 찬(압축이 센) 음악이다:
+/// 예전엔 이것도 잡음으로 봐서 역치가 음악 위로 올라가 그대로 붙어 있었다 (2026-11-15 사용자 지적).
+const AUTO_GATE_NOISE_MAX_DB: f32 = -50.0;
+/// 디지털 무음이 이만큼(초) 이어지면(곡이 멈춤) 기록을 비우고 역치를 하한으로 내린다.
+const AUTO_GATE_RESET_SILENT_S: f32 = 1.0;
+/// 역치가 목표를 따라가는 시간(초): 내려갈 때는 빨리, 올라갈 때는 천천히.
+const AUTO_GATE_FALL_S: f32 = 0.4;
+const AUTO_GATE_RISE_S: f32 = 1.5;
 /// 역치 자동의 하한. 소리가 거의 없을 때 역치가 따라 내려가 아주 작은 소리까지 잡지 않도록 한다
 /// (2026-11-15 사용자 지적: 예전 -80dB는 손 역치 기본값 -74dB보다도 낮았다).
 const AUTO_GATE_MIN_DB: f32 = -60.0;
@@ -146,8 +154,12 @@ struct AutoGate {
     /// 지금 역치 (dB). 목표를 부드럽게 따라간다.
     db: f32,
     target: f32,
-    /// 프레임마다 목표를 따라가는 비율.
-    follow: f32,
+    /// 프레임마다 목표를 따라가는 비율 (내려갈 때 / 올라갈 때).
+    fall: f32,
+    rise: f32,
+    /// 디지털 무음이 이어진 프레임 수와, 기록을 비우기까지의 프레임 수.
+    silent_run: usize,
+    reset_after: usize,
 }
 
 impl AutoGate {
@@ -159,26 +171,37 @@ impl AutoGate {
             every: (fps / 4.0).max(1.0) as usize,
             db: start_db,
             target: start_db,
-            follow: 1.0 - (-1.0 / (1.0 * fps)).exp(),
+            fall: 1.0 - (-1.0 / (AUTO_GATE_FALL_S * fps)).exp(),
+            rise: 1.0 - (-1.0 / (AUTO_GATE_RISE_S * fps)).exp(),
+            silent_run: 0,
+            reset_after: (AUTO_GATE_RESET_SILENT_S * fps) as usize,
         }
     }
 
     fn push(&mut self, db: f32) -> f32 {
         if db.is_finite() && db > AUTO_GATE_IGNORE_DB {
+            self.silent_run = 0;
             if self.hist.len() == self.cap {
                 self.hist.pop_front();
             }
             self.hist.push_back(db);
+        } else {
+            // 곡이 멈췄다: 지난 곡의 크기를 잊고 하한에서 다시 시작한다 (다음 곡이 작아도 바로 잡히게).
+            self.silent_run += 1;
+            if self.silent_run >= self.reset_after {
+                self.hist.clear();
+                self.target = AUTO_GATE_MIN_DB;
+            }
         }
         if self.countdown == 0 {
             self.countdown = self.every;
-            // 1초 넘게 들은 뒤에만 정한다. 디지털 무음이 이어지는 동안은 그대로 둔다.
+            // 0.5초 넘게 들은 뒤에만 정한다.
             if self.hist.len() * 8 >= self.cap {
                 let mut v: Vec<f32> = self.hist.iter().copied().collect();
                 v.sort_unstable_by(f32::total_cmp);
                 let at = |q: f32| v[((v.len() - 1) as f32 * q) as usize];
                 let (low, loud) = (at(0.10), at(0.95));
-                self.target = if loud - low < AUTO_GATE_STEADY_DB {
+                self.target = if loud - low < AUTO_GATE_STEADY_DB && loud < AUTO_GATE_NOISE_MAX_DB {
                     loud + 3.0
                 } else {
                     loud - AUTO_GATE_BELOW_DB
@@ -187,7 +210,8 @@ impl AutoGate {
             }
         }
         self.countdown -= 1;
-        self.db += (self.target - self.db) * self.follow;
+        let k = if self.target < self.db { self.fall } else { self.rise };
+        self.db += (self.target - self.db) * k;
         self.db
     }
 }
@@ -1037,30 +1061,19 @@ mod tests {
 
     #[test]
     fn auto_gate_follows_the_music_level() {
-        // 음악 비슷한 신호: 220Hz 음 위에 0.5초마다(120BPM) 클릭. 같은 곡을 크게/작게 틀어 본다.
-        let times = every(0.5, 0.1, 10.0);
-        let clicks_sig = clicks(&times, 10.0, 0.5);
-        let song: Vec<f32> =
-            clicks_sig.iter().enumerate().map(|(i, c)| c + 0.1 * (i as f32 * 220.0 * std::f32::consts::TAU / SR as f32).sin()).collect();
+        // 같은 곡을 크게/작게 틀어 본다: 역치는 곡의 크기를 따라 움직이고, 작게 틀어도 박은 계속 잡힌다.
         let run_at = |gain: f32| {
-            let mut a = Analyzer::new(SR, Params { silence_rms: 10f32.powf(-74.0 / 20.0), auto_gate: true, ..Params::default() });
-            let mut out = Vec::new();
-            for chunk in song.chunks(480) {
-                let c: Vec<f32> = chunk.iter().map(|v| v * gain).collect();
-                a.push(&c, &mut out);
-            }
+            let out = run_auto_gate(&song(10.0, gain));
             let late = &out[out.len() / 2..];
             (out.last().unwrap().gate_db, late.iter().filter(|f| f.bands[FULL].onset).count())
         };
-        let (loud_gate, loud_onsets) = run_at(0.3);
-        let (quiet_gate, quiet_onsets) = run_at(0.015); // -26dB
-        // 역치는 곡의 크기를 따라 내려가고, 작게 틀어도 박은 계속 잡힌다.
-        assert!(loud_gate > -60.0 && loud_gate < -24.0, "loud gate {loud_gate}");
-        assert!((loud_gate - quiet_gate - 26.0).abs() < 6.0, "loud {loud_gate} quiet {quiet_gate}");
-        let expected = times.iter().filter(|&&t| t > 5.0).count();
-        assert!(loud_onsets + 2 >= expected && quiet_onsets + 2 >= expected, "{loud_onsets}/{quiet_onsets} of {expected}");
+        let (loud_gate, loud_onsets) = run_at(1.0);
+        let (quiet_gate, quiet_onsets) = run_at(0.3); // -10.5dB
+        assert!(loud_gate > -50.0 && loud_gate < -24.0, "loud gate {loud_gate}");
+        assert!((loud_gate - quiet_gate - 10.5).abs() < 3.0, "loud {loud_gate} quiet {quiet_gate}");
+        assert!(loud_onsets >= 9 && quiet_onsets >= 9, "{loud_onsets}/{quiet_onsets}");
 
-        // 거의 들리지 않는 소리(-40dB)에는 역치가 하한(-60dB) 아래로 내려가지 않아 반응하지 않는다.
+        // 거의 들리지 않는 소리(-50dB)에는 역치가 하한(-60dB) 아래로 내려가지 않아 반응하지 않는다.
         let (faint_gate, faint_onsets) = run_at(0.003);
         assert!(faint_gate >= AUTO_GATE_MIN_DB - 0.5, "faint gate {faint_gate}");
         assert_eq!(faint_onsets, 0);
@@ -1073,7 +1086,67 @@ mod tests {
         for chunk in noise.chunks(480) {
             a.push(chunk, &mut out);
         }
-        assert!(out.iter().skip(out.len() * 2 / 3).all(|f| f.silent));
+        // 역치는 천천히(1.5초) 올라가므로 마지막 1.5초만 본다.
+        assert!(out.iter().skip(out.len() * 3 / 4).all(|f| f.silent));
+    }
+
+    /// 역치 자동으로 신호를 돌려 프레임들을 돌려준다.
+    fn run_auto_gate(sig: &[f32]) -> Vec<FrameOut> {
+        let mut a = Analyzer::new(SR, Params { silence_rms: 10f32.powf(-74.0 / 20.0), auto_gate: true, ..Params::default() });
+        let mut out = Vec::new();
+        for chunk in sig.chunks(480) {
+            a.push(chunk, &mut out);
+        }
+        out
+    }
+
+    /// 220Hz 음 위에 0.5초마다 클릭 (음악 흉내). gain으로 크기를 정한다.
+    fn song(secs: f32, gain: f32) -> Vec<f32> {
+        let times = every(0.5, 0.1, secs);
+        clicks(&times, secs, 0.5)
+            .iter()
+            .enumerate()
+            .map(|(i, c)| gain * (c + 0.3 * (i as f32 * 220.0 * std::f32::consts::TAU / SR as f32).sin()))
+            .collect()
+    }
+
+    #[test]
+    fn auto_gate_comes_back_down() {
+        // 큰 곡 → 2초 멈춤 → 30dB 작은 곡: 멈춘 사이 역치가 하한으로 내려와 작은 곡이 막히지 않는다.
+        // (박 감지 자체는 큰 곡 뒤 갑자기 30dB 작아지면 적응에 시간이 걸린다 — 역치와 별개다.)
+        let mut sig = song(8.0, 1.0);
+        sig.extend(std::iter::repeat(0.0).take(SR as usize * 2));
+        sig.extend(song(6.0, 0.03));
+        let out = run_auto_gate(&sig);
+        let fps = out.len() as f32 / 16.0;
+        let at = |s: f32| (s * fps) as usize;
+        let loud_gate = out[at(7.5)].gate_db;
+        let quiet = &out[at(10.5)..];
+        assert!(loud_gate > -50.0, "loud gate {loud_gate}");
+        assert!(out[at(10.2)].gate_db < -55.0, "gate after the pause {}", out[at(10.2)].gate_db);
+        assert!(quiet.iter().all(|f| !f.silent), "the quiet song must not be gated");
+
+        // 멈춤 없이 크게 → 작게 이어져도 몇 초 안에 내려온다.
+        let mut sig = song(8.0, 1.0);
+        sig.extend(song(8.0, 0.03));
+        let out = run_auto_gate(&sig);
+        let fps = out.len() as f32 / 16.0;
+        let g = out[(13.0 * fps) as usize].gate_db;
+        assert!(g < -55.0, "gate 5s into the quiet part {g}");
+    }
+
+    #[test]
+    fn auto_gate_stays_below_dense_loud_music() {
+        // 꽉 찬 음악 흉내: 크기가 거의 고른 큰 잡음 위에 클릭. 역치가 음악 위로 올라가 붙으면 안 된다.
+        let mut rng = Rng(11);
+        let times = every(0.5, 0.1, 8.0);
+        let c = clicks(&times, 8.0, 0.6);
+        let sig: Vec<f32> = c.iter().map(|v| v + rng.next() * 0.2).collect();
+        let out = run_auto_gate(&sig);
+        let late = &out[out.len() / 2..];
+        assert!(late.iter().all(|f| !f.silent), "dense music must not be gated");
+        let gate = out.last().unwrap().gate_db;
+        assert!(gate < -30.0, "gate {gate}");
     }
 
     #[test]
