@@ -20,7 +20,9 @@ const AUTO_GATE_WINDOW_S: f32 = 8.0;
 const AUTO_GATE_BELOW_DB: f32 = 30.0;
 /// 크기가 거의 변하지 않는(위아래 차이가 이보다 작은) 소리는 음악이 아니라 잡음으로 보고 그 위에 역치를 둔다.
 const AUTO_GATE_STEADY_DB: f32 = 6.0;
-const AUTO_GATE_MIN_DB: f32 = -80.0;
+/// 역치 자동의 하한. 소리가 거의 없을 때 역치가 따라 내려가 아주 작은 소리까지 잡지 않도록 한다
+/// (2026-11-15 사용자 지적: 예전 -80dB는 손 역치 기본값 -74dB보다도 낮았다).
+const AUTO_GATE_MIN_DB: f32 = -60.0;
 const AUTO_GATE_MAX_DB: f32 = -24.0;
 /// 이보다 작은 프레임(디지털 무음)은 역치 자동의 기록에 넣지 않는다.
 const AUTO_GATE_IGNORE_DB: f32 = -95.0;
@@ -1057,6 +1059,11 @@ mod tests {
         assert!((loud_gate - quiet_gate - 26.0).abs() < 6.0, "loud {loud_gate} quiet {quiet_gate}");
         let expected = times.iter().filter(|&&t| t > 5.0).count();
         assert!(loud_onsets + 2 >= expected && quiet_onsets + 2 >= expected, "{loud_onsets}/{quiet_onsets} of {expected}");
+
+        // 거의 들리지 않는 소리(-40dB)에는 역치가 하한(-60dB) 아래로 내려가지 않아 반응하지 않는다.
+        let (faint_gate, faint_onsets) = run_at(0.003);
+        assert!(faint_gate >= AUTO_GATE_MIN_DB - 0.5, "faint gate {faint_gate}");
+        assert_eq!(faint_onsets, 0);
 
         // 크기가 일정한 잡음뿐이면 역치가 잡음 위로 올라가 반응하지 않는다.
         let mut rng = Rng(9);
