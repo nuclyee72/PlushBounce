@@ -142,6 +142,19 @@ pub fn toggle_mode(app: &AppHandle, state: &Shared) {
     });
 }
 
+/// 앱이 끝나기 직전의 정리. 보통 끝날 때(RunEvent::Exit)와 업데이트 설치 직전에 부른다.
+pub fn shutdown(app: &AppHandle, state: &Shared) {
+    crate::window::control::save_if_dirty();
+    // 바탕화면 모드였다면 창을 먼저 떼고 바탕화면을 다시 그리게 한다 (검게 남지 않도록).
+    if let Some(stage) = stage::current(app, state) {
+        let _ = stage.destroy();
+    }
+    crate::window::wallpaper::detached(&state.config_file);
+    if lock(&state.runtime).edit_mode || state.dirty.load(Ordering::Acquire) {
+        state.save_now();
+    }
+}
+
 pub fn quit(app: &AppHandle, state: &Shared) {
     state.save_now();
     app.exit(0);

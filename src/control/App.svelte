@@ -5,6 +5,7 @@
   import DollsTab from "./DollsTab.svelte";
   import Icon from "./Icon.svelte";
   import Preview from "./Preview.svelte";
+  import UpdateBanner from "./UpdateBanner.svelte";
   import { app, fail, init } from "./store.svelte";
 
   const tabs = [
@@ -37,14 +38,17 @@
         <DisplayTab />
       {/if}
     </section>
-    {#if problem}
-      <div class="error" role="alert">
-        <span>{problem}</span>
-        {#if app.error}
-          <button aria-label="Close" onclick={() => (app.error = null)}><Icon name="x" /></button>
-        {/if}
-      </div>
-    {/if}
+    <div class="notices">
+      <UpdateBanner />
+      {#if problem}
+        <div class="error" role="alert">
+          <span>{problem}</span>
+          {#if app.error}
+            <button aria-label="Close" onclick={() => (app.error = null)}><Icon name="x" /></button>
+          {/if}
+        </div>
+      {/if}
+    </div>
   </main>
 {/if}
 
@@ -84,6 +88,14 @@
     flex-direction: column;
     gap: 14px;
     padding: 2px;
+  }
+  .notices {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .notices:empty {
+    display: none;
   }
   .error {
     display: flex;

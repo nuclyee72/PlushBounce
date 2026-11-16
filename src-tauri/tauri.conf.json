@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "PlushBounce",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "identifier": "com.plushbounce.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -31,9 +31,17 @@
       }
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkyODI1OUQ4OUVBOEJBREEKUldUYXVxaWUyRm1Da2htQ3U5NlgzYStNWE5BOW5xejRqM0FXTEN0K2sybGpxM1pHZ3ZJZkowelQK",
+      "endpoints": ["https://github.com/nuclyee72/PlushBounce/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"]
   }
 }

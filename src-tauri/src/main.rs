@@ -7,10 +7,11 @@ mod config;
 mod images;
 mod samples;
 mod state;
+mod updater;
 mod window;
 
 use config::Config;
-use state::{lock, AppState, Runtime, Shared};
+use state::{AppState, Runtime, Shared};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -28,6 +29,7 @@ fn main() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -91,6 +93,7 @@ fn main() {
             audio::start(handle.clone(), state.clone());
             window::cursor::start(handle.clone(), state.clone());
             actions::handle_args(&handle, &state, std::env::args().collect());
+            updater::init(&handle);
 
             // 변경이 있으면 잠시 뒤 한 번에 저장한다.
             let saver = state.clone();
@@ -135,24 +138,20 @@ fn main() {
             commands::set_edit_mode,
             commands::export_preset,
             commands::import_preset,
+            commands::app_version,
+            commands::get_update,
+            commands::check_update,
+            commands::install_update,
         ])
         .build(tauri::generate_context!())
         .expect("failed to start PlushBounce");
 
     app.run(|app, event| {
         if let RunEvent::Exit = event {
-            window::control::save_if_dirty();
-            // 바탕화면 모드였다면 창을 먼저 떼고 바탕화면을 다시 그리게 한다 (검게 남지 않도록).
             if let Some(state) = app.try_state::<Shared>() {
-                if let Some(stage) = window::stage::current(app, &state) {
-                    let _ = stage.destroy();
-                }
-                window::wallpaper::detached(&state.config_file);
-            }
-            if let Some(state) = app.try_state::<Shared>() {
-                if lock(&state.runtime).edit_mode || state.dirty.load(Ordering::Acquire) {
-                    state.save_now();
-                }
+                actions::shutdown(app, &state);
+            } else {
+                window::control::save_if_dirty();
             }
         }
     });

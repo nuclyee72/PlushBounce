@@ -4,6 +4,7 @@ use crate::actions;
 use crate::audio::sessions::{self, AudioSession};
 use crate::config::{Background, Config};
 use crate::images;
+use crate::updater;
 use crate::state::{Runtime, Shared};
 use crate::window::stage::{self, MonitorInfo};
 use std::path::{Path, PathBuf};
@@ -140,4 +141,24 @@ pub async fn import_preset(app: AppHandle, state: S<'_>, path: String) -> Result
     }
     // 현재 모드와 다르면 apply_config가 stage 창을 다시 만든다.
     Ok(actions::apply_config(&app, &state, cfg, "rust"))
+}
+
+#[tauri::command]
+pub fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+#[tauri::command]
+pub fn get_update(app: AppHandle) -> Option<updater::UpdateInfo> {
+    updater::pending(&app)
+}
+
+#[tauri::command]
+pub async fn check_update(app: AppHandle) -> Result<Option<updater::UpdateInfo>, String> {
+    updater::check(&app).await.map_err(|e| format!("Couldn't check for updates: {e}"))
+}
+
+#[tauri::command]
+pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    updater::install(&app).await
 }

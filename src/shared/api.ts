@@ -8,6 +8,8 @@ import type {
   CursorPos,
   MonitorInfo,
   Runtime,
+  UpdateInfo,
+  UpdateProgress,
 } from "./types";
 
 export const api = {
@@ -24,6 +26,10 @@ export const api = {
   setEditMode: (on: boolean) => invoke<void>("set_edit_mode", { on }),
   exportPreset: (path: string) => invoke<void>("export_preset", { path }),
   importPreset: (path: string) => invoke<Config>("import_preset", { path }),
+  appVersion: () => invoke<string>("app_version"),
+  getUpdate: () => invoke<UpdateInfo | null>("get_update"),
+  checkUpdate: () => invoke<UpdateInfo | null>("check_update"),
+  installUpdate: () => invoke<void>("install_update"),
 };
 
 export function imageUrl(imagesDir: string, file: string): string {
@@ -41,3 +47,11 @@ export const onCursor = (cb: (p: CursorPos) => void): Promise<UnlistenFn> =>
 
 export const onRuntimeChanged = (cb: (r: Runtime) => void): Promise<UnlistenFn> =>
   listen<Runtime>("runtime-changed", (e) => cb(e.payload));
+
+export const onUpdateAvailable = (cb: (u: UpdateInfo | null) => void): Promise<UnlistenFn> =>
+  listen<UpdateInfo | null>("update-available", (e) => cb(e.payload));
+
+export const onUpdateProgress = (cb: (p: UpdateProgress) => void): Promise<UnlistenFn> =>
+  listen<UpdateProgress>("update-progress", (e) => cb(e.payload));
+
+export const onUpdateRequested = (cb: () => void): Promise<UnlistenFn> => listen("update-requested", () => cb());

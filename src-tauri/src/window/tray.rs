@@ -1,15 +1,16 @@
-//! 트레이 아이콘: 조작 창 열기 / 편집 모드 토글 / 모드 전환 / 종료.
+//! 트레이 아이콘: 조작 창 열기 / 편집 모드 토글 / 모드 전환 / 업데이트 / 종료.
 
 use crate::actions;
 use crate::config::Mode;
 use crate::state::{lock, Shared};
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, Wry};
+use tauri::{AppHandle, Emitter, Manager, Wry};
 
 pub struct TrayItems {
     edit: CheckMenuItem<Wry>,
     mode: MenuItem<Wry>,
+    update: MenuItem<Wry>,
 }
 
 fn mode_text(mode: Mode) -> &'static str {
@@ -24,9 +25,10 @@ pub fn build(app: &AppHandle, state: &Shared) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open controls", true, None::<&str>)?;
     let edit = CheckMenuItem::with_id(app, "edit", "Edit mode", mode == Mode::Pet, false, Some("Ctrl+Alt+P"))?;
     let mode_item = MenuItem::with_id(app, "mode", mode_text(mode), true, None::<&str>)?;
+    let update = MenuItem::with_id(app, "update", "Check for updates", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&open, &edit, &mode_item, &sep, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &edit, &mode_item, &sep, &update, &quit])?;
 
     let mut builder = TrayIconBuilder::with_id("main").tooltip("PlushBounce").menu(&menu).show_menu_on_left_click(false);
     if let Some(icon) = app.default_window_icon() {
@@ -37,6 +39,11 @@ pub fn build(app: &AppHandle, state: &Shared) -> tauri::Result<()> {
         "open" => actions::open_control(app, &s),
         "edit" => actions::toggle_edit_mode(app, &s),
         "mode" => actions::toggle_mode(app, &s),
+        // 조작 창을 열고 거기서 확인·설치 여부를 묻는다.
+        "update" => {
+            actions::open_control(app, &s);
+            let _ = app.emit("update-requested", ());
+        }
         "quit" => actions::quit(app, &s),
         _ => {}
     });
@@ -47,7 +54,7 @@ pub fn build(app: &AppHandle, state: &Shared) -> tauri::Result<()> {
         }
     });
     builder.build(app)?;
-    app.manage(TrayItems { edit, mode: mode_item });
+    app.manage(TrayItems { edit, mode: mode_item, update });
     Ok(())
 }
 
@@ -59,4 +66,14 @@ pub fn sync(app: &AppHandle, state: &Shared) {
     let _ = items.edit.set_checked(edit);
     let _ = items.edit.set_enabled(mode == Mode::Pet);
     let _ = items.mode.set_text(mode_text(mode));
+}
+
+/// 새 버전이 있으면 메뉴 문구에 알린다.
+pub fn set_update(app: &AppHandle, version: Option<&str>) {
+    let Some(items) = app.try_state::<TrayItems>() else { return };
+    let text = match version {
+        Some(v) => format!("Update to {v}…"),
+        None => "Check for updates".into(),
+    };
+    let _ = items.update.set_text(text);
 }

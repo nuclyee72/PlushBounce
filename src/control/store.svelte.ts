@@ -1,7 +1,7 @@
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { api, onAudioFrame, onConfigChanged, onRuntimeChanged } from "../shared/api";
+import { api, onAudioFrame, onConfigChanged, onRuntimeChanged, onUpdateAvailable, onUpdateProgress, onUpdateRequested } from "../shared/api";
 import { BAND_IDS, DOLL_EXTENSIONS } from "../shared/types";
-import type { AudioFrame, AudioSession, BandId, Config, MonitorInfo, Runtime } from "../shared/types";
+import type { AudioFrame, AudioSession, BandId, Config, MonitorInfo, Runtime, UpdateInfo } from "../shared/types";
 import type { StageRenderer } from "../stage/renderer";
 
 const zero = (): Record<BandId, number> => ({ kick: 0, bass: 0, mid: 0, high: 0, full: 0 });
@@ -19,6 +19,48 @@ export const app = $state({
   tab: "dolls" as "dolls" | "audio" | "display",
   dropping: false,
 });
+
+/** 자동 업데이트. 새 버전이 있어도 사용자가 Install을 누르기 전에는 내려받지 않는다. */
+export const update = $state({
+  version: "",
+  info: null as UpdateInfo | null,
+  /** "Later"를 누른 버전. 같은 버전은 다시 띄우지 않는다 (트레이·Display 탭에서는 계속 보인다). */
+  dismissed: null as string | null,
+  checking: false,
+  installing: false,
+  /** 0..1, 전체 크기를 모르면 null. */
+  progress: null as number | null,
+  /** 직접 확인했을 때의 결과 문구. */
+  status: null as string | null,
+});
+
+export async function checkForUpdates(): Promise<void> {
+  if (update.checking || update.installing) return;
+  update.checking = true;
+  update.status = null;
+  try {
+    update.info = await api.checkUpdate();
+    update.dismissed = null;
+    update.status = update.info ? null : "You're up to date.";
+  } catch (e) {
+    fail(e);
+  } finally {
+    update.checking = false;
+  }
+}
+
+export async function installUpdate(): Promise<void> {
+  if (update.installing) return;
+  update.installing = true;
+  update.progress = null;
+  try {
+    // 성공하면 설치 파일이 앱을 끝내고 설치 뒤 다시 켠다.
+    await api.installUpdate();
+  } catch (e) {
+    fail(e);
+    update.installing = false;
+  }
+}
 
 /** 실시간 미터 값. flash는 온셋 직후 1에서 0으로 줄어든다. */
 export const live = $state({ level: zero(), flash: zero(), bpm: null as number | null, beat: 0, input: -100, gapMs: null as number | null, gateDb: null as number | null });
@@ -134,6 +176,17 @@ export async function init(): Promise<void> {
   });
   await onRuntimeChanged((r) => {
     app.runtime = r;
+  });
+
+  update.version = await api.appVersion();
+  update.info = await api.getUpdate();
+  await onUpdateAvailable((u) => (update.info = u));
+  await onUpdateProgress((p) => (update.progress = p.total ? Math.min(1, p.downloaded / p.total) : null));
+  // 트레이의 "Check for updates": 새 버전을 이미 알면 안내를 다시 띄우고, 아니면 확인한다.
+  await onUpdateRequested(() => {
+    app.tab = "display";
+    if (update.info) update.dismissed = null;
+    else void checkForUpdates();
   });
 
   let latest: AudioFrame | null = null;

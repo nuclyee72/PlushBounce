@@ -5,7 +5,7 @@
   import { api } from "../shared/api";
   import Icon from "./Icon.svelte";
   import Slider from "./Slider.svelte";
-  import { app, commit, fail } from "./store.svelte";
+  import { app, checkForUpdates, commit, fail, update } from "./store.svelte";
 
   const cfg = $derived(app.cfg!);
   const bg = $derived(cfg.display.background);
@@ -108,6 +108,16 @@
   <button onclick={importPreset}><Icon name="upload" />Load preset</button>
 </div>
 
+<div class="row">
+  <span class="version">PlushBounce {update.version}</span>
+  {#if update.info}
+    <button class="on" disabled={update.installing} onclick={() => (update.dismissed = null)}><Icon name="download" />Update to {update.info.version}</button>
+  {:else}
+    <button disabled={update.checking} onclick={checkForUpdates}><Icon name="refresh" />{update.checking ? "Checking…" : "Check for updates"}</button>
+    {#if update.status}<span class="version">{update.status}</span>{/if}
+  {/if}
+</div>
+
 <style>
   .sw {
     width: 18px;
@@ -118,6 +128,9 @@
   }
   .checker {
     background: repeating-conic-gradient(#555b70 0% 25%, #2b2f3d 0% 50%) 50% / 10px 10px;
+  }
+  .version {
+    color: var(--dim);
   }
   .spacer {
     flex: 1;

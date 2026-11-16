@@ -165,3 +165,14 @@ export type AudioSession = { pid: number; name: string; display: string };
 export type CursorPos = { x: number; y: number } | null;
 
 export type ConfigChanged = { config: Config; origin: string };
+
+export interface UpdateInfo {
+  version: string;
+  currentVersion: string;
+  notes: string | null;
+}
+
+export interface UpdateProgress {
+  downloaded: number;
+  total: number | null;
+}
