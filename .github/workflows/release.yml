@@ -30,7 +30,7 @@ jobs:
           $tag = "${{ github.ref_name }}".TrimStart("v")
           $conf = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
           $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ($conf -ne $tag -or $pkg -ne $tag) { throw "Tag $tag, tauri.conf.json $conf, package.json $pkg: versions differ" }
+          if ($conf -ne $tag -or $pkg -ne $tag) { throw "Tag ${tag}, tauri.conf.json ${conf}, package.json ${pkg}: versions differ" }
 
       - name: Check the updater public key is set
         shell: pwsh
