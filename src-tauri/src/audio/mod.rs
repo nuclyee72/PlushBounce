@@ -1,7 +1,15 @@
 //! 오디오 파이프라인: [캡처 스레드] → 채널 → [분석 스레드] → "audio-frame" 이벤트.
 
 pub mod analysis;
+#[cfg(windows)]
 pub mod capture;
+#[cfg(windows)]
+pub mod sessions;
+#[cfg(target_os = "macos")]
+#[path = "capture_mac.rs"]
+pub mod capture;
+#[cfg(target_os = "macos")]
+#[path = "sessions_mac.rs"]
 pub mod sessions;
 
 use crate::config::Bands;

@@ -1,0 +1,58 @@
+# 푸시·PR마다 Windows와 macOS에서 빌드·테스트한다 (macOS 장비 없이 맥 빌드가 깨지지 않았는지 확인하는 용도).
+# 손으로 돌리려면 Actions 탭에서 "Check" → "Run workflow".
+
+name: Check
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+      - run: npx vitest run
+      # tauri::generate_context!가 dist 폴더를 읽으므로 프런트를 먼저 빌드한다.
+      - run: npm run build
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test
+
+      # 업데이트 서명 키 없이 빌드되도록 업데이트 파일 만들기는 끈다.
+      - name: Build the macOS app bundle
+        if: runner.os == 'macOS'
+        run: npx tauri build --debug --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      # zip으로 올리면 실행 권한이 빠지므로 tar로 묶는다.
+      - name: Pack the app
+        if: runner.os == 'macOS'
+        run: tar -czf PlushBounce-macos-debug.tar.gz -C src-tauri/target/debug/bundle/macos PlushBounce.app
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'macOS'
+        with:
+          name: PlushBounce-macos-debug
+          path: PlushBounce-macos-debug.tar.gz

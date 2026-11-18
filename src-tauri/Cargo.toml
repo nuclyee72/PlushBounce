@@ -8,7 +8,7 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
+tauri = { version = "2", features = ["tray-icon", "protocol-asset", "macos-private-api"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
@@ -16,8 +16,11 @@ tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 realfft = "3"
-wasapi = "0.27"
 image = { version = "0.25", default-features = false, features = ["png", "gif", "webp", "jpeg", "bmp", "tiff", "ico", "tga", "pnm", "qoi", "dds"] }
+tauri-plugin-updater = "2"
+
+[target.'cfg(windows)'.dependencies]
+wasapi = "0.27"
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Media_Audio",
@@ -28,7 +31,14 @@ windows = { version = "0.62", features = [
   "Win32_Graphics_Gdi",
   "Win32_System_Registry",
 ] }
-tauri-plugin-updater = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-core-foundation = "0.3"
+objc2-core-audio = "0.3"
+objc2-core-audio-types = "0.3"
 
 [profile.dev]
 opt-level = 1

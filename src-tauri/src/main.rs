@@ -146,13 +146,21 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("failed to start PlushBounce");
 
-    app.run(|app, event| {
-        if let RunEvent::Exit = event {
+    app.run(|app, event| match event {
+        RunEvent::Exit => {
             if let Some(state) = app.try_state::<Shared>() {
                 actions::shutdown(app, &state);
             } else {
                 window::control::save_if_dirty();
             }
         }
+        // macOS: Dock 아이콘을 누르면 숨겨 둔 조작 창을 연다.
+        #[cfg(target_os = "macos")]
+        RunEvent::Reopen { .. } => {
+            if let Some(state) = app.try_state::<Shared>() {
+                actions::open_control(app, &state);
+            }
+        }
+        _ => {}
     });
 }

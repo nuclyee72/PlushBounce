@@ -6,8 +6,20 @@ use crate::state::{lock, Shared};
 use serde::Serialize;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
-use windows::Win32::Foundation::POINT;
-use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+/// 마우스의 화면 좌표 (물리 픽셀, 모니터 좌표와 같은 기준).
+#[cfg(windows)]
+fn cursor_pos(_app: &AppHandle) -> Option<(i32, i32)> {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    let mut p = POINT::default();
+    unsafe { GetCursorPos(&mut p) }.ok().map(|_| (p.x, p.y))
+}
+
+#[cfg(not(windows))]
+fn cursor_pos(app: &AppHandle) -> Option<(i32, i32)> {
+    app.cursor_position().ok().map(|p| (p.x.round() as i32, p.y.round() as i32))
+}
 
 /// stage 창 기준 비율 좌표 (0..1 = 창 안).
 #[derive(Serialize, Clone, Copy, PartialEq)]
@@ -31,8 +43,7 @@ pub fn start(app: AppHandle, state: Shared) {
                 std::thread::sleep(Duration::from_millis(250));
                 continue;
             }
-            let mut p = POINT::default();
-            let now = unsafe { GetCursorPos(&mut p) }.ok().map(|_| (p.x, p.y));
+            let now = cursor_pos(&app);
             let changed = match &last {
                 Some((l, prev)) => *l != label || *prev != now,
                 None => true,

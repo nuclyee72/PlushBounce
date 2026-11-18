@@ -111,14 +111,21 @@ fn build(app: &AppHandle, state: &Shared, mode: Mode) -> Result<WebviewWindow, S
     let _ = win.set_position(PhysicalPosition::new(mon.x, mon.y));
     let _ = win.set_size(PhysicalSize::new(mon.w, mon.h));
     *lock(&STAGE_RECT) = (mon.x, mon.y, mon.w, mon.h);
-    let hwnd = win.hwnd().map_err(|e| e.to_string())?;
 
     let placed = if pet {
         let edit = lock(&state.runtime).edit_mode;
         let _ = win.set_ignore_cursor_events(!edit);
+        #[cfg(target_os = "macos")]
+        wallpaper::float_everywhere(&win);
         Ok(())
     } else {
-        let r = wallpaper::attach(hwnd, (mon.x, mon.y, mon.w as i32, mon.h as i32));
+        #[cfg(windows)]
+        let r = win
+            .hwnd()
+            .map_err(|e| e.to_string())
+            .and_then(|hwnd| wallpaper::attach(hwnd, (mon.x, mon.y, mon.w as i32, mon.h as i32)));
+        #[cfg(target_os = "macos")]
+        let r = wallpaper::attach(&win);
         if r.is_ok() {
             wallpaper::mark_attached(&state.config_file);
         }

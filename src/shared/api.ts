@@ -33,7 +33,9 @@ export const api = {
 };
 
 export function imageUrl(imagesDir: string, file: string): string {
-  return convertFileSrc(`${imagesDir}\\${file}`);
+  // Windows 경로면 역슬래시, macOS면 슬래시로 잇는다.
+  const sep = imagesDir.includes("\\") ? "\\" : "/";
+  return convertFileSrc(`${imagesDir}${sep}${file}`);
 }
 
 export const onAudioFrame = (cb: (f: AudioFrame) => void): Promise<UnlistenFn> =>

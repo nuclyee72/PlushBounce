@@ -158,3 +158,18 @@
 
 - 구버전(24H2 이전) 바탕화면 경로: 개발 PC가 신버전이라 실행해 보지 못했다.
 - 출력 장치를 바꿨을 때의 재연결(M6): 장치를 바꿀 수단이 없어 코드 경로만 있다.
+
+## macOS (사용자 요청, 2026-11-18 "맥에서도 돌아가게". 맥 장비 없이 만듦)
+
+- 플랫폼별 코드는 같은 이름의 모듈을 `#[cfg]`로 바꿔 끼운다: `audio/capture.rs`·`sessions.rs`·`window/wallpaper.rs`(Windows) ↔ `capture_mac.rs`·`sessions_mac.rs`·`wallpaper_mac.rs`(macOS). 공개 함수 모양이 같아서 나머지 코드는 그대로다. `wasapi`·`windows` 크레이트는 Windows에서만 받는다.
+- 소리 캡처: Core Audio 프로세스 탭(macOS 14.2+)을 쓴다. ScreenCaptureKit(13+)도 있지만 "화면 녹화" 권한을 받아야 하고 Rust 크레이트가 Swift 빌드를 요구해서 뺐다. 탭은 "시스템 오디오 녹음" 권한만 받고, 순수 Rust(objc2)라 Windows에서도 맥 타깃으로 컴파일 검사를 할 수 있다. 그래서 최소 버전이 macOS 14.2다(`tauri.macos.conf.json`).
+  - 탭은 기본 출력 장치를 시계로 쓰는 비공개 aggregate 장치에 붙여 IOProc으로 읽는다(Apple 예제 AudioCap과 같은 구성). 시스템 전체는 "이 앱을 뺀 전역 탭", 앱 선택은 고른 앱 프로세스들의 스테레오 믹스다. Windows처럼 앱마다 스트림을 열어 직접 섞지 않는다(Core Audio가 섞는다).
+  - 앱은 실행 파일 경로에서 가장 바깥쪽 `.app` 번들 이름으로 묶는다(설정의 `names`에는 이 이름이 들어간다). 브라우저의 도우미 프로세스도 한 앱이 된다. 번들 밖의 프로세스(Safari가 쓰는 WebKit GPU 프로세스 등)는 앱 목록에 없다. 그런 앱은 "시스템 전체"로 듣는다.
+  - 1초마다 기본 출력 장치와 고른 앱의 프로세스 목록을 비교해, 바뀌면 탭을 다시 만든다(도우미 프로세스가 새로 생겨도 따라간다).
+  - 권한 문구는 `src-tauri/Info.plist`의 `NSAudioCaptureUsageDescription`.
+- 바탕화면 모드: stage 창의 레벨을 바탕화면 레벨(`kCGDesktopWindowLevel`)로 내린다. 아이콘은 그 위 레벨이라 인형이 아이콘 뒤에 그려진다. 창을 다른 창에 붙이는 게 아니라서 바탕화면을 되살리는 표시 파일은 쓰지 않는다(no-op). 펫 창은 모든 데스크톱(Space)·전체 화면 앱 위에 나오게 한다.
+- 마우스 위치는 macOS에서 Tauri의 `cursor_position()`을 쓴다(Windows는 그대로 `GetCursorPos`).
+- 창 투명도에 `macOSPrivateApi`가 필요해 켰다(Windows에서는 아무 영향 없음). Dock 아이콘을 누르면 조작 창이 열린다.
+- 서명: Apple 개발자 인증서가 없어서 ad-hoc 서명(`signingIdentity: "-"`)이다. 처음 열 때 Gatekeeper가 막으므로 시스템 설정 → 개인정보 보호 및 보안 → "그래도 열기"를 눌러야 한다. ad-hoc 서명은 빌드마다 달라서 업데이트 뒤에 오디오 권한을 다시 물을 수 있다.
+- 배포: 릴리스 워크플로가 Windows·Apple Silicon·Intel 세 빌드를 한 초안 릴리스에 올리고 `latest.json`에 합친다. `check.yml`이 푸시마다 macOS에서 테스트를 돌리고 디버그 `.app`을 만들어 아티팩트로 올린다.
+- 검사: Windows에서 `cargo check --target aarch64-apple-darwin`은 C를 컴파일하는 의존성(ring, objc2-exception-helper) 때문에 Apple SDK가 필요하다. 빈 파일만 만드는 가짜 `CC`/`AR`를 주면 Rust 코드는 검사할 수 있다(링크하지 않으므로). 실제 동작은 맥에서만 확인할 수 있다.
