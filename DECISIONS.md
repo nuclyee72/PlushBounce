@@ -173,3 +173,4 @@
 - 서명: Apple 개발자 인증서가 없어서 ad-hoc 서명(`signingIdentity: "-"`)이다. 처음 열 때 Gatekeeper가 막으므로 시스템 설정 → 개인정보 보호 및 보안 → "그래도 열기"를 눌러야 한다. ad-hoc 서명은 빌드마다 달라서 업데이트 뒤에 오디오 권한을 다시 물을 수 있다.
 - 배포: 릴리스 워크플로가 Windows·Apple Silicon·Intel 세 빌드를 한 초안 릴리스에 올리고 `latest.json`에 합친다. `check.yml`이 푸시마다 macOS에서 테스트를 돌리고 디버그 `.app`을 만들어 아티팩트로 올린다.
 - 검사: Windows에서 `cargo check --target aarch64-apple-darwin`은 C를 컴파일하는 의존성(ring, objc2-exception-helper) 때문에 Apple SDK가 필요하다. 빈 파일만 만드는 가짜 `CC`/`AR`를 주면 Rust 코드는 검사할 수 있다(링크하지 않으므로). 실제 동작은 맥에서만 확인할 수 있다.
+- 확인: 2026-11-22 사용자 친구의 맥에서 CI 디버그 빌드가 잘 돈다고 확인받았다(세부 항목별 결과는 받지 못함). 그래서 main에 합치고 0.5.0으로 낸다. 맥은 0.5.0을 `.dmg`로 한 번 직접 설치하고, 그 뒤로는 앱 안에서 업데이트된다.
