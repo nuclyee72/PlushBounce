@@ -174,3 +174,4 @@
 - 배포: 릴리스 워크플로가 Windows·Apple Silicon·Intel 세 빌드를 한 초안 릴리스에 올리고 `latest.json`에 합친다. `check.yml`이 푸시마다 macOS에서 테스트를 돌리고 디버그 `.app`을 만들어 아티팩트로 올린다.
 - 검사: Windows에서 `cargo check --target aarch64-apple-darwin`은 C를 컴파일하는 의존성(ring, objc2-exception-helper) 때문에 Apple SDK가 필요하다. 빈 파일만 만드는 가짜 `CC`/`AR`를 주면 Rust 코드는 검사할 수 있다(링크하지 않으므로). 실제 동작은 맥에서만 확인할 수 있다.
 - 확인: 2026-11-22 사용자 친구의 맥에서 CI 디버그 빌드가 잘 돈다고 확인받았다(세부 항목별 결과는 받지 못함). 그래서 main에 합치고 0.5.0으로 낸다. 맥은 0.5.0을 `.dmg`로 한 번 직접 설치하고, 그 뒤로는 앱 안에서 업데이트된다.
+- 업데이트 (2026-11-25): 친구가 0.5.0 맥 앱에서 업데이트를 누르자 `Read-only file system (os error 30)`가 났다. 경로가 `/AppTranslocation/`였다. 격리 표시(`com.apple.quarantine`)가 남은 서명 없는 앱은 macOS가 읽기 전용 임시 위치로 옮겨 실행하므로 업데이터가 앱을 바꿔 쓸 수 없다. 공증 없이는 막을 수 없어서, 이 상태를 알아채면(실행 경로나 os error 30) Applications로 옮기고 `xattr -dr com.apple.quarantine /Applications/PlushBounce.app`를 실행하라고 안내한다. 릴리스 노트의 맥 설치 안내에도 이 명령을 넣었다.

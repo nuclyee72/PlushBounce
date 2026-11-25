@@ -90,6 +90,9 @@ async fn install_inner(app: &AppHandle) -> Result<(), String> {
     if lock(&app.state::<UpdateState>().pending).is_none() {
         return Err("There's no update to install.".into());
     }
+    if translocated() {
+        return Err(MAC_READ_ONLY.into());
+    }
 
     // 설치 파일을 실행하기 직전, 끝낼 때와 같은 정리를 한다 (바탕화면 모드 해제·설정 저장).
     // 업데이터는 std::process::exit으로 끝내므로 RunEvent::Exit이 오지 않는다.
@@ -119,5 +122,26 @@ async fn install_inner(app: &AppHandle) -> Result<(), String> {
             || {},
         )
         .await
-        .map_err(|e| format!("Couldn't install the update: {e}"))
+        .map_err(|e| {
+            let e = e.to_string();
+            // 옮긴 위치가 아니더라도 앱 폴더를 고쳐 쓸 수 없으면 같은 안내를 한다.
+            if cfg!(target_os = "macos") && e.contains("os error 30") {
+                MAC_READ_ONLY.to_string()
+            } else {
+                format!("Couldn't install the update: {e}")
+            }
+        })
+}
+
+/// macOS는 내려받은(격리 표시가 남은) 서명 없는 앱을 읽기 전용 임시 위치(App Translocation)로
+/// 옮겨 실행한다. 그 상태에서는 업데이터가 앱을 바꿔 쓸 수 없으므로 고치는 법을 알려 준다.
+const MAC_READ_ONLY: &str = "macOS is running PlushBounce from a temporary read-only copy, so it can't update itself.\n\
+1. Quit PlushBounce and make sure it's in your Applications folder.\n\
+2. Run this once in Terminal:\n\
+xattr -dr com.apple.quarantine /Applications/PlushBounce.app\n\
+3. Open PlushBounce again and install the update.";
+
+fn translocated() -> bool {
+    cfg!(target_os = "macos")
+        && std::env::current_exe().is_ok_and(|p| p.to_string_lossy().contains("/AppTranslocation/"))
 }

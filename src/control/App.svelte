@@ -111,6 +111,7 @@
   }
   .error span {
     flex: 1;
+    white-space: pre-line;
   }
   .error button {
     padding: 2px;
